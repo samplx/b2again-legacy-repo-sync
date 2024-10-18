@@ -36,7 +36,7 @@ const PROGRAM_NAME: string = 'themattic';
 const VERSION: string = '0.1.0';
 
 // set to true for quick debugging using a fixed set (much less that 50k)
-const DEBUG_USE_FIXED_THEME_SLUGS = true;
+const DEBUG_USE_FIXED_THEME_SLUGS = false;
 
 /**
  * A simple Either-like structure to capture the results of a download.
