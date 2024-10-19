@@ -294,6 +294,7 @@ async function handleThemeInfo(
     try {
         if (force) {
             await Deno.remove(themeJson, { recursive: true });
+            await Deno.remove(legacyThemeJson, { recursive: true });
         }
         const contents = await Deno.readTextFile(legacyThemeJson);
         return JSON.parse(contents);
