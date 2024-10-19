@@ -246,3 +246,27 @@ export async function saveDownloadStatus(statusFilename: string, info: GroupDown
     }
     return true;
 }
+
+/**
+ * This function is to prevent us reading an existing
+ * file in order to recalculate the message digests (hashes). When we
+ * use an existing file, we will copy the hashes if necessary, but
+ * otherwise use the more recent data.
+ * @param existing An optional existing download info.
+ * @param recent The most recent download info.
+ * @returns merged results.
+ */
+export function mergeDownloadInfo(existing: undefined | DownloadFileInfo, recent: DownloadFileInfo): DownloadFileInfo {
+    const { sha256: exSha256, md5: exMd5 } = existing ?? { };
+    const { filename, when, status: nStatus, md5: nMd5, sha256: nSha256 } = recent;
+    const sha256 = nSha256 ?? exSha256;
+    const md5 = nMd5 ?? exMd5;
+    return {
+        filename,
+        when,
+        status: nStatus,
+        md5,
+        sha256
+    };
+}
+

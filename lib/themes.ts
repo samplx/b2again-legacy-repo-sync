@@ -53,3 +53,59 @@ export interface ThemeInfo {
     is_community?: boolean;
     external_repository_url?: string;
 }
+
+function getBasename(url: string): string {
+    return url.substring(url.lastIndexOf('/')+1);
+}
+
+function isWordpressOrg(url: string): boolean {
+    return url.startsWith('https://wordpress.org/');
+}
+
+function getReviewUrl(supportBaseUrl: string, slug: string): string {
+    return new URL(`/reviews/themes/legacy/${slug}/`, supportBaseUrl).toString();
+}
+
+function getHomepageUlr(supportBaseUrl: string, slug: string): string {
+    return new URL(`/homepages/themes/legacy/${slug}/`, supportBaseUrl).toString();
+}
+
+export function migrateThemeInfo(downloadsBaseUrl: string, supportBaseUrl: string, themeDir: string, input: ThemeInfo): ThemeInfo {
+
+    const kleen = { ...input };
+    if ((typeof kleen.author === 'string') && (kleen.author.indexOf('@') < 0)) {
+        kleen.author = `${kleen.author}@wordpress.org`;
+    } else if ((typeof kleen.author === 'object') &&
+               (kleen.author.user_nicename && (kleen.author.user_nicename.indexOf('@') < 0))) {
+        kleen.author.user_nicename = `${kleen.author.user_nicename}@wordpress.org`;
+    }
+    kleen.preview_url = new URL(`${themeDir}/preview/index.html`, downloadsBaseUrl).toString();
+    if (kleen.screenshot_url) {
+        const screenshot = getBasename(kleen.screenshot_url);
+        kleen.screenshot_url = new URL(`${themeDir}/screenshots/${screenshot}`, downloadsBaseUrl).toString();
+    }
+    if (kleen.download_link) {
+        const download = getBasename(kleen.download_link);
+        kleen.download_link = new URL(`${themeDir}/${download}`, downloadsBaseUrl).toString();
+    }
+    if (kleen.reviews_url && kleen.slug && isWordpressOrg(kleen.reviews_url)) {
+        kleen.reviews_url = getReviewUrl(supportBaseUrl, kleen.slug);
+    }
+    if (kleen.homepage && kleen.slug && isWordpressOrg(kleen.homepage)) {
+        kleen.homepage = getHomepageUlr(supportBaseUrl, kleen.slug);
+    }
+    if (kleen.versions) {
+        // kleen is a shallow copy, deepen it before we mutate it
+        kleen.versions = { ...kleen.versions };
+        for (const version in kleen.versions) {
+            const basename = getBasename(kleen.versions[version]);
+            kleen.versions[version] = new URL(`${themeDir}/${basename}`, downloadsBaseUrl).toString();
+        }
+    }
+    kleen.rating = 0;
+    kleen.ratings = { '1': 0, '2': 0, '3': 0, '4': 0, '5': 0 };
+    kleen.num_ratings = 0;
+    kleen.active_installs = 0;
+    kleen.downloaded = 0;
+    return kleen;
+}

@@ -22,12 +22,13 @@ import {
     getHrefListFromPage,
     GroupDownloadInfo,
     readDownloadStatus,
-    saveDownloadStatus
+    saveDownloadStatus,
+    mergeDownloadInfo
 } from "./lib/downloads.ts";
 import { printSplitSummary, splitFilename } from "./lib/split-filename.ts";
 import { parseArgs, ParseOptions } from "jsr:@std/cli/parse-args";
 import * as path from "jsr:@std/path";
-import { ThemeInfo } from "./lib/themes.ts";
+import { migrateThemeInfo, ThemeInfo } from "./lib/themes.ts";
 import { ConsoleReporter, VERBOSE_CONSOLE_REPORTER, QUIET_CONSOLE_REPORTER } from "./lib/reporter.ts";
 
 /** how the script describes itself. */
@@ -86,7 +87,8 @@ interface CommandOptions {
     statusFilename: string;
 
     /** URL address of the base of the download tree. */
-    targetBaseUrl: string;
+    downloadsBaseUrl: string;
+    supportBaseUrl: string;
 
     /** top-level directory where build results are to be stored. */
     themesDir: string;
@@ -109,7 +111,8 @@ const parseOptions: ParseOptions = {
         prefixLength: '2',
         repoHost: 'themes.svn.wordpress.org',
         statusFilename: 'themes-status.json',
-        targetBaseUrl: 'https://downloads.b2again.org/',
+        downloadsBaseUrl: 'https://downloads.b2again.org/',
+        supportBaseUrl: 'https://support.b2again.org/',
         themesDir: path.join('themes', 'legacy'),
         update: false,
     },
@@ -126,7 +129,8 @@ const parseOptions: ParseOptions = {
         'prefixLength',
         'repoHost',
         'statusFilename',
-        'targetBaseUrl',
+        'downloadsBaseUrl',
+        'supportBaseUrl',
         'themesDir'
     ],
     unknown: (arg: string): unknown => {
@@ -141,7 +145,7 @@ const parseOptions: ParseOptions = {
  * @param slug theme slug.
  * @returns
  */
-async function processTheme(options: CommandOptions, prefixLength: number, slug: string, force: boolean): Promise<GroupDownloadInfo> {
+async function processTheme(options: CommandOptions, prefixLength: number, slug: string, force: boolean, needHash: boolean): Promise<GroupDownloadInfo> {
     const themeDir = path.join(options.themesDir, splitFilename(slug, prefixLength));
 
     const files: Record<string, DownloadFileInfo> = {};
@@ -151,14 +155,15 @@ async function processTheme(options: CommandOptions, prefixLength: number, slug:
         reporter(`> mkdir -p ${themeDir}`);
         await Deno.mkdir(themeDir, { recursive: true });
 
-        const themeInfo = await handleThemeInfo(themeDir, infoUrl, force);
+        const themeInfo = await handleThemeInfo(options, themeDir, infoUrl, force);
         if (themeInfo) {
             if ((typeof themeInfo.slug !== 'string') ||
                 (typeof themeInfo.error === 'string') ||
                 (typeof themeInfo.download_link !== 'string')) {
                 ok = false;
             } else {
-                const fileInfo = await downloadThemeZip(themeInfo.download_link, themeDir);
+                const zipFilename = path.join(themeDir, themeInfo.download_link.substring(themeInfo.download_link.lastIndexOf('/')+1));
+                const fileInfo = await downloadFile(reporter, new URL(themeInfo.download_link), zipFilename, force, needHash);
                 ok = ok && (fileInfo.status === 'full');
                 files[fileInfo.filename] = fileInfo;
                 if (options.full) {
@@ -171,7 +176,6 @@ async function processTheme(options: CommandOptions, prefixLength: number, slug:
                         const previewInfo = await downloadFile(reporter, new URL(themeInfo.preview_url), previewIndex);
                         ok = ok && (previewInfo.status === 'full');
                         files[previewInfo.filename] = previewInfo;
-
                     }
                     if (typeof themeInfo.screenshot_url === 'string') {
                         // screenshot_url
@@ -187,7 +191,7 @@ async function processTheme(options: CommandOptions, prefixLength: number, slug:
                         files[screenshotInfo.filename] = screenshotInfo;
                     }
                     if (typeof themeInfo.versions === 'object') {
-                        for (const version of Object.keys(themeInfo.versions)) {
+                        for (const version in themeInfo.versions) {
                             if (version !== 'trunk') {
                                 const fileInfo = await downloadThemeZip(themeInfo.versions[version], themeDir);
                                 files[fileInfo.filename] = fileInfo;
@@ -270,13 +274,14 @@ async function downloadThemeZip(sourceUrl: string, themeDir: string): Promise<Do
  * @param force if true, remove any old file first.
  * @returns
  */
-async function handleThemeInfo(themeDir: string, infoUrl: URL, force: boolean = false): Promise<ThemeDownloadResult> {
+async function handleThemeInfo(options: CommandOptions, themeDir: string, infoUrl: URL, force: boolean = false): Promise<ThemeDownloadResult> {
     const themeJson = path.join(themeDir, 'theme.json');
+    const legacyThemeJson = path.join(themeDir, 'legacy-theme.json');
     try {
         if (force) {
             await Deno.remove(themeJson, { recursive: true });
         }
-        const contents = await Deno.readTextFile(themeJson);
+        const contents = await Deno.readTextFile(legacyThemeJson);
         return JSON.parse(contents);
     } catch (_) {
         reporter(`fetch(${infoUrl}) > ${themeJson}`);
@@ -287,8 +292,11 @@ async function handleThemeInfo(themeDir: string, infoUrl: URL, force: boolean = 
             return { error };
         }
         const json = await response.json();
-        const text = JSON.stringify(json, null, '    ');
+        const rawText = JSON.stringify(json, null, options.jsonSpaces);
+        const sanitized = migrateThemeInfo(options.downloadsBaseUrl, options.supportBaseUrl, themeDir, json);
+        const text = JSON.stringify(sanitized, null, options.jsonSpaces);
         await Deno.writeTextFile(themeJson, text);
+        await Deno.writeTextFile(legacyThemeJson, rawText);
         return json;
     }
 }
@@ -357,6 +365,7 @@ async function main(argv: Array<string>): Promise<number> {
     let failure: number = 0;
     let skipped: number = 0;
     let needed: boolean = false;
+    let changed: boolean = false;
     for (const slug of themeSlugs) {
         needed = false;
         if (typeof status.map[slug] !== 'object') {
@@ -384,7 +393,9 @@ async function main(argv: Array<string>): Promise<number> {
             }
             soFar += 1;
             if (needed || options.initial) {
-                const themeStatus = await processTheme(options, prefixLength, slug, options.initial || options.update);
+                const force = options.initial || options.update;
+                const themeStatus = await processTheme(options, prefixLength, slug, force, false);
+                changed = true;
                 if ((themeStatus.status === 'full') || (themeStatus.status === 'partial')) {
                     success += 1;
                 } else if (themeStatus.status === 'failed') {
@@ -392,32 +403,46 @@ async function main(argv: Array<string>): Promise<number> {
                 } else {
                     console.error(`Warning: unknown status after processTheme: slug=${slug}`);
                 }
-                status.map[slug] = themeStatus;
+                const existing = status.map[slug].files;
+                status.map[slug].status = themeStatus.status;
+                status.map[slug].when = themeStatus.when;
+                status.map[slug].files = {};
+                for (const name in themeStatus.files) {
+                    status.map[slug].files[name] = mergeDownloadInfo(existing[name], themeStatus.files[name]);
+                }
                 ok = ok && (themeStatus.status !== 'failed');
             } else {
                 skipped += 1;
+                if ((status.map[slug]?.status === 'full') || (status.map[slug]?.status === 'partial')) {
+                    success += 1;
+                } else if (status.map[slug]?.status === 'failed') {
+                    failure += 1;
+                }
             }
         } else {
             console.error(`Error: unknown status: slug=${slug}`);
         }
         if ((soFar % 10) == 0) {
-            ok = await saveDownloadStatus(statusFilename, status) && ok;
+            if (changed) {
+                reporter(`save status > ${statusFilename}`);
+                ok = await saveDownloadStatus(statusFilename, status) && ok;
+            }
+            changed = false;
             reporter('');
             reporter(`themes processed:   ${soFar}`);
             reporter(`successful:         ${success}`);
             reporter(`failures:           ${failure}`);
             reporter(`skipped:            ${skipped}`);
-            reporter(`ok:                 ${ok}`);
         }
     }
     status.when = Date.now();
+    reporter(`save status > ${statusFilename}`);
     ok = await saveDownloadStatus(statusFilename, status) && ok;
 
     reporter(`Total themes processed:   ${soFar}`);
     reporter(`Total successful:         ${success}`);
     reporter(`Total failures:           ${failure}`);
     reporter(`Total skipped:            ${skipped}`);
-    reporter(`ok:                       ${ok}`);
 
     if (!ok) {
         return 1;
