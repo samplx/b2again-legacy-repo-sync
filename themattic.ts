@@ -36,9 +36,6 @@ const PROGRAM_NAME: string = 'themattic';
 /** current semver */
 const VERSION: string = '0.1.0';
 
-// set to true for quick debugging using a fixed set (much less that 50k)
-const DEBUG_USE_FIXED_THEME_SLUGS = false;
-
 /**
  * A simple Either-like structure to capture the results of a download.
  */
@@ -56,20 +53,20 @@ interface CommandOptions {
     /** where to get information */
     apiHost: string;
 
-    /** top-level directory where build results are to be stored. */
-    buildDir: string;
-
-    /** name of the configuration/program to use to fork. */
-    config: string;
+    /** URL address of the base of the download tree. */
+    downloadsBaseUrl: string;
 
     /** where to get themes */
     downloadsHost: string;
 
+    /** true to force download of all files. */
+    force: boolean;
+
     /** true if all files should be downloaded. */
     full: boolean;
 
-    /** true if this is the initial import (no skips). */
-    initial: boolean;
+    /** true if failures should be retried. */
+    retry: boolean;
 
     /** spaces when rendering JSON. */
     jsonSpaces: string;
@@ -86,8 +83,7 @@ interface CommandOptions {
     /** name of JSON file containing the download status. */
     statusFilename: string;
 
-    /** URL address of the base of the download tree. */
-    downloadsBaseUrl: string;
+    /** URL address of the support server. */
     supportBaseUrl: string;
 
     /** top-level directory where build results are to be stored. */
@@ -95,6 +91,8 @@ interface CommandOptions {
 
     /** flag indicating an update operation. */
     update: boolean;
+
+    DEBUG_USE_FIXED_THEME_SLUGS: boolean;
 
     /** rest of the arguments of the command-line. */
     _: Array<string>;
@@ -104,23 +102,27 @@ interface CommandOptions {
 const parseOptions: ParseOptions = {
     default: {
         apiHost: 'api.wordpress.org',
+        downloadsBaseUrl: 'https://downloads.b2again.org/',
         downloadsHost: 'downloads.wordpress.org',
+        force: false,
         full: false,
-        initial: false,
+        retry: false,
         jsonSpaces: '    ',
         prefixLength: '2',
         repoHost: 'themes.svn.wordpress.org',
         statusFilename: 'themes-status.json',
-        downloadsBaseUrl: 'https://downloads.b2again.org/',
         supportBaseUrl: 'https://support.b2again.org/',
-        themesDir: path.join('themes', 'legacy'),
+        themesDir: 'themes',
         update: false,
+        DEBUG_USE_FIXED_THEME_SLUGS: false,
     },
     boolean: [
+        'force',
         'full',
-        'initial',
         'quiet',
-        'update'
+        'retry',
+        'update',
+        'DEBUG_USE_FIXED_THEME_SLUGS'
     ],
     string: [
         'apiHost',
@@ -145,55 +147,59 @@ const parseOptions: ParseOptions = {
  * @param slug theme slug.
  * @returns
  */
-async function processTheme(options: CommandOptions, prefixLength: number, slug: string, force: boolean, needHash: boolean): Promise<GroupDownloadInfo> {
-    const themeDir = path.join(options.themesDir, splitFilename(slug, prefixLength));
+async function processTheme(options: CommandOptions, prefixLength: number, slug: string): Promise<GroupDownloadInfo> {
+    const themeReadOnlyDir = path.join(options.themesDir, 'read-only', 'legacy', splitFilename(slug, prefixLength));
+    const themeMetaDir = path.join(options.themesDir, 'meta', 'legacy', splitFilename(slug, prefixLength));
+    const themeLiveDir = path.join(options.themesDir, 'live', 'legacy', splitFilename(slug, prefixLength));
 
     const files: Record<string, DownloadFileInfo> = {};
     const infoUrl = getThemeInfoUrl(options.apiHost, slug);
     let ok = true;
     try {
-        reporter(`> mkdir -p ${themeDir}`);
-        await Deno.mkdir(themeDir, { recursive: true });
+        reporter(`> mkdir -p ${themeReadOnlyDir}`);
+        await Deno.mkdir(themeReadOnlyDir, { recursive: true });
+        reporter(`> mkdir -p ${themeMetaDir}`);
+        await Deno.mkdir(themeMetaDir, { recursive: true });
 
-        const themeInfo = await handleThemeInfo(options, themeDir, infoUrl, force);
+        const themeInfo = await handleThemeInfo(options, themeLiveDir, themeMetaDir, themeReadOnlyDir, infoUrl);
         if (themeInfo) {
             if ((typeof themeInfo.slug !== 'string') ||
                 (typeof themeInfo.error === 'string') ||
                 (typeof themeInfo.download_link !== 'string')) {
                 ok = false;
             } else {
-                const zipFilename = path.join(themeDir, themeInfo.download_link.substring(themeInfo.download_link.lastIndexOf('/')+1));
-                const fileInfo = await downloadFile(reporter, new URL(themeInfo.download_link), zipFilename, force, needHash);
+                const zipFilename = path.join(themeReadOnlyDir, themeInfo.download_link.substring(themeInfo.download_link.lastIndexOf('/')+1));
+                const fileInfo = await downloadFile(reporter, new URL(themeInfo.download_link), zipFilename, options.force, options.update);
                 ok = ok && (fileInfo.status === 'full');
                 files[fileInfo.filename] = fileInfo;
                 if (options.full) {
                     if (typeof themeInfo.preview_url === 'string') {
                         // preview_url
-                        const previewDir = path.join(themeDir, 'preview');
+                        const previewDir = path.join(themeLiveDir, 'preview');
                         reporter(`> mkdir -p ${previewDir}`);
                         await Deno.mkdir(previewDir, { recursive: true });
                         const previewIndex = path.join(previewDir, 'index.html');
-                        const previewInfo = await downloadFile(reporter, new URL(themeInfo.preview_url), previewIndex);
+                        const previewInfo = await downloadFile(reporter, new URL(themeInfo.preview_url), previewIndex, options.force, options.update);
                         ok = ok && (previewInfo.status === 'full');
                         files[previewInfo.filename] = previewInfo;
                     }
                     if (typeof themeInfo.screenshot_url === 'string') {
                         // screenshot_url
-                        const screenshotsDir = path.join(themeDir, 'screenshots');
+                        const screenshotsDir = path.join(themeLiveDir, 'screenshots');
                         reporter(`> mkdir -p ${screenshotsDir}`);
                         await Deno.mkdir(screenshotsDir, { recursive: true });
                         // some ts.w.org URL's don't have a scheme?
                         const screenshotUrl = new URL(themeInfo.screenshot_url.startsWith('//') ? `https:${themeInfo.screenshot_url}` : themeInfo.screenshot_url);
                         const screenshotFile = path.join(screenshotsDir,
                             screenshotUrl.pathname.substring(screenshotUrl.pathname.lastIndexOf('/')+1));
-                        const screenshotInfo = await downloadFile(reporter, screenshotUrl, screenshotFile);
+                        const screenshotInfo = await downloadFile(reporter, screenshotUrl, screenshotFile, options.force, options.update);
                         ok = ok && (screenshotInfo.status === 'full');
                         files[screenshotInfo.filename] = screenshotInfo;
                     }
                     if (typeof themeInfo.versions === 'object') {
                         for (const version in themeInfo.versions) {
                             if (version !== 'trunk') {
-                                const fileInfo = await downloadThemeZip(themeInfo.versions[version], themeDir);
+                                const fileInfo = await downloadThemeZip(options, themeInfo.versions[version], themeReadOnlyDir);
                                 files[fileInfo.filename] = fileInfo;
                                 ok = ok && (fileInfo.status === 'full');
                             }
@@ -237,8 +243,8 @@ function getThemeInfoUrl(apiHost: string, name: string): URL {
  * @param listUrl where to access the theme list
  * @returns list of theme slugs.
  */
-async function getThemeSlugs(listUrl: string): Promise<Array<string>> {
-    if (DEBUG_USE_FIXED_THEME_SLUGS) {
+async function getThemeSlugs(listUrl: string, fixedList: boolean = false): Promise<Array<string>> {
+    if (fixedList) {
         return [
             '100-bytes',
             'acid-rain',
@@ -260,9 +266,9 @@ async function getThemeSlugs(listUrl: string): Promise<Array<string>> {
  * @param themeDir where to put the zip file.
  * @returns true if download was successful, false if not.
  */
-async function downloadThemeZip(sourceUrl: string, themeDir: string): Promise<DownloadFileInfo> {
+async function downloadThemeZip(options: CommandOptions, sourceUrl: string, themeDir: string): Promise<DownloadFileInfo> {
     const zipFilename = path.join(themeDir, sourceUrl.substring(sourceUrl.lastIndexOf('/')+1));
-    return await downloadFile(reporter, new URL(sourceUrl), zipFilename);
+    return await downloadFile(reporter, new URL(sourceUrl), zipFilename, options.force, options.update);
 }
 
 /**
@@ -274,9 +280,16 @@ async function downloadThemeZip(sourceUrl: string, themeDir: string): Promise<Do
  * @param force if true, remove any old file first.
  * @returns
  */
-async function handleThemeInfo(options: CommandOptions, themeDir: string, infoUrl: URL, force: boolean = false): Promise<ThemeDownloadResult> {
-    const themeJson = path.join(themeDir, 'theme.json');
-    const legacyThemeJson = path.join(themeDir, 'legacy-theme.json');
+async function handleThemeInfo(
+    options: CommandOptions,
+    themeLiveDir: string,
+    themeMetaDir: string,
+    themeReadOnlyDir: string,
+    infoUrl: URL,
+    force: boolean = false
+): Promise<ThemeDownloadResult> {
+    const themeJson = path.join(themeMetaDir, 'theme.json');
+    const legacyThemeJson = path.join(themeMetaDir, 'legacy-theme.json');
     try {
         if (force) {
             await Deno.remove(themeJson, { recursive: true });
@@ -293,8 +306,8 @@ async function handleThemeInfo(options: CommandOptions, themeDir: string, infoUr
         }
         const json = await response.json();
         const rawText = JSON.stringify(json, null, options.jsonSpaces);
-        const sanitized = migrateThemeInfo(options.downloadsBaseUrl, options.supportBaseUrl, themeDir, json);
-        const text = JSON.stringify(sanitized, null, options.jsonSpaces);
+        const migrated = migrateThemeInfo(options.downloadsBaseUrl, options.supportBaseUrl, themeLiveDir, themeReadOnlyDir, json);
+        const text = JSON.stringify(migrated, null, options.jsonSpaces);
         await Deno.writeTextFile(themeJson, text);
         await Deno.writeTextFile(legacyThemeJson, rawText);
         return json;
@@ -338,7 +351,7 @@ async function main(argv: Array<string>): Promise<number> {
         console.error(`Error: network access is required to repoHost ${options.downloadsHost}`);
         return 1;
     }
-    const themeSlugs = await getThemeSlugs(`https://${options.repoHost}/`);
+    const themeSlugs = await getThemeSlugs(`https://${options.repoHost}/`, options.DEBUG_USE_FIXED_THEME_SLUGS);
     if (themeSlugs.length === 0) {
         console.error(`Error: no themes found`);
         return 1;
@@ -385,16 +398,15 @@ async function main(argv: Array<string>): Promise<number> {
                     needed = false;
                     break;
                 case 'failed':
-                    needed = options.update;
+                    needed = options.retry;
                     break;
                 default:
                     console.error(`Error: unrecognized status. slug=${slug}, status=${status.map[slug]?.status}`);
                     break;
             }
             soFar += 1;
-            if (needed || options.initial) {
-                const force = options.initial || options.update;
-                const themeStatus = await processTheme(options, prefixLength, slug, force, false);
+            if (needed || options.force) {
+                const themeStatus = await processTheme(options, prefixLength, slug);
                 changed = true;
                 if ((themeStatus.status === 'full') || (themeStatus.status === 'partial')) {
                     success += 1;

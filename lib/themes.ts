@@ -18,11 +18,11 @@
 
 export interface ThemeAuthor {
     user_nicename?: string;
-    profile?: string;
-    avatar?: string;
+    profile?: boolean | string;
+    avatar?: boolean | string;
     display_name?: string;
-    author?: string;
-    author_url?: string;
+    author?: boolean | string;
+    author_url?: boolean | string;
 }
 
 export interface ThemeInfo {
@@ -58,19 +58,34 @@ function getBasename(url: string): string {
     return url.substring(url.lastIndexOf('/')+1);
 }
 
-function isWordpressOrg(url: string): boolean {
-    return url.startsWith('https://wordpress.org/');
+function getHomepageUlr(supportBaseUrl: string, slug: string): string {
+    return new URL(`/homepages/themes/legacy/${slug}/`, supportBaseUrl).toString();
 }
 
 function getReviewUrl(supportBaseUrl: string, slug: string): string {
     return new URL(`/reviews/themes/legacy/${slug}/`, supportBaseUrl).toString();
 }
 
-function getHomepageUlr(supportBaseUrl: string, slug: string): string {
-    return new URL(`/homepages/themes/legacy/${slug}/`, supportBaseUrl).toString();
+function getScreenshotUrl(downloadsBaseUrl: string, themeLiveDir: string, url: string): string {
+    const screenshot = getBasename(url);
+    return new URL(`${themeLiveDir}/screenshots/${screenshot}`, downloadsBaseUrl).toString();
 }
 
-export function migrateThemeInfo(downloadsBaseUrl: string, supportBaseUrl: string, themeDir: string, input: ThemeInfo): ThemeInfo {
+function getZipUrl(downloadsBaseUrl: string, themeReadOnlyDir: string, existing: string): string {
+    const filename = getBasename(existing);
+    return new URL(`${themeReadOnlyDir}/${filename}`, downloadsBaseUrl).toString();
+
+}
+
+function isWordpressOrg(url: string): boolean {
+    return url.startsWith('https://wordpress.org/');
+}
+
+export function migrateThemeInfo(downloadsBaseUrl: string,
+                                 supportBaseUrl: string,
+                                 themeLiveDir: string,
+                                 themeReadOnlyDir: string,
+                                 input: ThemeInfo): ThemeInfo {
 
     const kleen = { ...input };
     if ((typeof kleen.author === 'string') && (kleen.author.indexOf('@') < 0)) {
@@ -79,14 +94,12 @@ export function migrateThemeInfo(downloadsBaseUrl: string, supportBaseUrl: strin
                (kleen.author.user_nicename && (kleen.author.user_nicename.indexOf('@') < 0))) {
         kleen.author.user_nicename = `${kleen.author.user_nicename}@wordpress.org`;
     }
-    kleen.preview_url = new URL(`${themeDir}/preview/index.html`, downloadsBaseUrl).toString();
+    kleen.preview_url = new URL(`${themeLiveDir}/preview/index.html`, downloadsBaseUrl).toString();
     if (kleen.screenshot_url) {
-        const screenshot = getBasename(kleen.screenshot_url);
-        kleen.screenshot_url = new URL(`${themeDir}/screenshots/${screenshot}`, downloadsBaseUrl).toString();
+        kleen.screenshot_url = getScreenshotUrl(downloadsBaseUrl, themeLiveDir, kleen.screenshot_url);
     }
     if (kleen.download_link) {
-        const download = getBasename(kleen.download_link);
-        kleen.download_link = new URL(`${themeDir}/${download}`, downloadsBaseUrl).toString();
+        kleen.download_link = getZipUrl(downloadsBaseUrl, themeReadOnlyDir, kleen.download_link);
     }
     if (kleen.reviews_url && kleen.slug && isWordpressOrg(kleen.reviews_url)) {
         kleen.reviews_url = getReviewUrl(supportBaseUrl, kleen.slug);
@@ -98,8 +111,7 @@ export function migrateThemeInfo(downloadsBaseUrl: string, supportBaseUrl: strin
         // kleen is a shallow copy, deepen it before we mutate it
         kleen.versions = { ...kleen.versions };
         for (const version in kleen.versions) {
-            const basename = getBasename(kleen.versions[version]);
-            kleen.versions[version] = new URL(`${themeDir}/${basename}`, downloadsBaseUrl).toString();
+            kleen.versions[version] = getZipUrl(downloadsBaseUrl, themeReadOnlyDir, kleen.versions[version]);
         }
     }
     kleen.rating = 0;
