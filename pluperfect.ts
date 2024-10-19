@@ -37,9 +37,6 @@ const PROGRAM_NAME: string = 'pluperfect';
 /** current semver */
 const VERSION: string = '0.1.0';
 
-// set to true for quick debugging using a fixed set (much less that 100k)
-const DEBUG_USE_FIXED_PLUGIN_SLUGS = false;
-
 /** Poor implementation of an Either for the download results. */
 type PluginDownloadResult = DownloadErrorInfo & PluginInfo;
 
