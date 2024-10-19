@@ -1,3 +1,4 @@
+#!/usr/bin/env -S deno run --allow-read --allow-write --allow-net
 /*
  *  Copyright 2024 James Burlingame
  *
