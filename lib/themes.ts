@@ -58,7 +58,7 @@ function getBasename(url: string): string {
     return url.substring(url.lastIndexOf('/')+1);
 }
 
-function getHomepageUlr(supportBaseUrl: string, slug: string): string {
+function getHomepageUrl(supportBaseUrl: string, slug: string): string {
     return new URL(`/homepages/themes/legacy/${slug}/`, supportBaseUrl).toString();
 }
 
@@ -105,7 +105,7 @@ export function migrateThemeInfo(downloadsBaseUrl: string,
         kleen.reviews_url = getReviewUrl(supportBaseUrl, kleen.slug);
     }
     if (kleen.homepage && kleen.slug && isWordpressOrg(kleen.homepage)) {
-        kleen.homepage = getHomepageUlr(supportBaseUrl, kleen.slug);
+        kleen.homepage = getHomepageUrl(supportBaseUrl, kleen.slug);
     }
     if (kleen.versions) {
         // kleen is a shallow copy, deepen it before we mutate it
