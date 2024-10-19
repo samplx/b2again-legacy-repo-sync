@@ -286,13 +286,12 @@ async function handleThemeInfo(
     themeLiveDir: string,
     themeMetaDir: string,
     themeReadOnlyDir: string,
-    infoUrl: URL,
-    force: boolean = false
+    infoUrl: URL
 ): Promise<ThemeDownloadResult> {
     const themeJson = path.join(themeMetaDir, 'theme.json');
     const legacyThemeJson = path.join(themeMetaDir, 'legacy-theme.json');
     try {
-        if (force) {
+        if (options.force) {
             await Deno.remove(themeJson, { recursive: true });
             await Deno.remove(legacyThemeJson, { recursive: true });
         }
