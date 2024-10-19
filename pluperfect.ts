@@ -22,11 +22,12 @@ import {
     DownloadFileInfo,
     getHrefListFromPage,
     GroupDownloadInfo,
+    mergeDownloadInfo,
     readDownloadStatus,
     saveDownloadStatus
 } from "./lib/downloads.ts";
 import { printSplitSummary, splitFilename } from "./lib/split-filename.ts";
-import { PluginInfo } from "./lib/plugins.ts";
+import { migratePluginInfo, PluginInfo } from "./lib/plugins.ts";
 import { parseArgs, ParseOptions } from "jsr:@std/cli/parse-args";
 import * as path from "jsr:@std/path";
 import { ConsoleReporter, VERBOSE_CONSOLE_REPORTER, QUIET_CONSOLE_REPORTER } from "./lib/reporter.ts";
@@ -51,17 +52,23 @@ let reporter: ConsoleReporter = VERBOSE_CONSOLE_REPORTER;
  * Results of parsing the command-line.
  */
 interface CommandOptions {
-    /** true if all files should be downloaded. */
-    full: boolean;
-
     /** where to get information */
     apiHost: string;
+
+    /** base url for static file downloads. */
+    downloadsBaseUrl: string;
 
     /** where to get plugins */
     downloadsHost: string;
 
-    /** true if this is the initial import of forked sources (no skips). */
-    initial: boolean;
+    /** true to force files to be downloaded. */
+    force: boolean;
+
+    /** true if all missing files should be downloaded. */
+    full: boolean;
+
+    /** how many spaces between elements in JSON. */
+    jsonSpaces: string;
 
     /** top-level directory where plugins are to be stored. */
     pluginsDir: string;
@@ -75,11 +82,20 @@ interface CommandOptions {
     /** where to get sources */
     repoHost: string;
 
+    /** true if failed downloads should be retried. */
+    retry: boolean;
+
     /** name of JSON file containing the download status. */
     statusFilename: string;
 
+    /** base url for support pages. */
+    supportBaseUrl: string;
+
     /** flag indicating an update operation. */
     update: boolean;
+
+    /** debug flag to use a fixed list of plugin slugs. */
+    DEBUG_USE_FIXED_PLUGIN_SLUGS: boolean;
 
     /** rest of the arguments of the command-line. */
     _: Array<string>;
@@ -92,29 +108,39 @@ interface CommandOptions {
 const parseOptions: ParseOptions = {
     default: {
         apiHost: 'api.wordpress.org',
+        downloadsBaseUrl: 'https://downloads.b2again.org/',
         downloadsHost: 'downloads.wordpress.org',
-        initial: false,
+        force: false,
         full: false,
-        pluginsDir: path.join('plugins', 'legacy'),
+        jsonSpaces: '    ',
+        pluginsDir: 'plugins',
         prefixLength: '2',
         quiet: false,
         repoHost: 'plugins.svn.wordpress.org',
+        retry: false,
         statusFilename: 'plugins-status.json',
+        supportBaseUrl: 'https://support.b2again.org/',
         update: false,
+        DEBUG_USE_FIXED_PLUGIN_SLUGS: false,
     },
     boolean: [
+        'force',
         'full',
-        'initial',
         'quiet',
+        'retry',
         'update',
+        'DEBUG_USE_FIXED_PLUGIN_SLUGS'
     ],
     string: [
         'apiHost',
+        'downloadsBaseUrl',
         'downloadsHost',
+        'jsonSpaces',
         'pluginsDir',
         'prefixLength',
         'repoHost',
         'statusFilename',
+        'supportBaseUrl',
     ],
     unknown: (arg: string): unknown => {
         console.error(`Warning: unrecognized option ignored '${arg}'`);
@@ -127,8 +153,8 @@ const parseOptions: ParseOptions = {
  * @param listUrl where to access the plugin list
  * @returns list of plugin slugs.
  */
-async function getPluginSlugs(listUrl: string): Promise<Array<string>> {
-    if (DEBUG_USE_FIXED_PLUGIN_SLUGS) {
+async function getPluginSlugs(listUrl: string, useFixedList: boolean = false): Promise<Array<string>> {
+    if (useFixedList) {
         return [
             'hello-dolly',              // classic, no screenshot and both banners
             'oxyplug-image',            // missing - 404
@@ -164,16 +190,19 @@ async function downloadPluginZip(sourceUrl: string, pluginDir: string): Promise<
  * @param force if true, remove any old file first.
  * @returns
  */
-async function handlePluginInfo(pluginDir: string, infoUrl: URL, force: boolean = false): Promise<PluginDownloadResult> {
-    const pluginJson = path.join(pluginDir, 'plugin.json');
+async function handlePluginInfo(options: CommandOptions, pluginMetaDir: string, split: string, infoUrl: URL): Promise<PluginDownloadResult> {
+    const pluginJson = path.join(pluginMetaDir, 'plugin.json');
+    const legacyPluginJson = path.join(pluginMetaDir, 'legacy-plugin.json');
+
     try {
-        if (force) {
+        if (options.force) {
             await Deno.remove(pluginJson, { recursive: true });
+            await Deno.remove(legacyPluginJson, { recursive: true });
         }
-        const contents = await Deno.readTextFile(pluginJson);
+        const contents = await Deno.readTextFile(legacyPluginJson);
         return JSON.parse(contents);
     } catch (_) {
-        reporter(`fetch(${infoUrl}) > ${pluginJson}`);
+        reporter(`fetch(${infoUrl}) > ${legacyPluginJson}`);
         const response = await fetch(infoUrl);
         if (!response.ok) {
             const error = `${response.status} ${response.statusText}`;
@@ -181,8 +210,11 @@ async function handlePluginInfo(pluginDir: string, infoUrl: URL, force: boolean 
             return { error };
         }
         const json = await response.json();
-        const text = JSON.stringify(json, null, '    ');
+        const rawText = JSON.stringify(json, null, options.jsonSpaces);
+        const migrated = migratePluginInfo(options.downloadsBaseUrl, options.supportBaseUrl, split, json);
+        const text = JSON.stringify(migrated, null, options.jsonSpaces);
         await Deno.writeTextFile(pluginJson, text);
+        await Deno.writeTextFile(legacyPluginJson, rawText);
         return json;
     }
 }
@@ -194,38 +226,43 @@ async function handlePluginInfo(pluginDir: string, infoUrl: URL, force: boolean 
  * @param slug plugin slug.
  * @returns
  */
-async function processPlugin(options: CommandOptions, prefixLength: number, slug: string, force: boolean): Promise<GroupDownloadInfo> {
-    const pluginDir = path.join(options.pluginsDir, splitFilename(slug, prefixLength));
+async function processPlugin(options: CommandOptions, prefixLength: number, slug: string): Promise<GroupDownloadInfo> {
+    const split = splitFilename(slug, prefixLength);
+    const pluginLiveDir = path.join(options.pluginsDir, 'live', 'legacy', split);
+    const pluginMetaDir = path.join(options.pluginsDir, 'meta', 'legacy', split);
+    const pluginReadOnlyDir = path.join(options.pluginsDir, 'read-only', 'legacy', split);
 
     const files: Record<string, DownloadFileInfo> = {};
     const infoUrl = getPluginInfoUrl(options.apiHost, slug);
     let ok = true;
     try {
-        reporter(`> mkdir -p ${pluginDir}`);
-        await Deno.mkdir(pluginDir, { recursive: true });
+        reporter(`> mkdir -p ${pluginReadOnlyDir}`);
+        await Deno.mkdir(pluginReadOnlyDir, { recursive: true });
+        reporter(`> mkdir -p ${pluginMetaDir}`);
+        await Deno.mkdir(pluginMetaDir, { recursive: true });
 
-        const pluginInfo = await handlePluginInfo(pluginDir, infoUrl, force);
+        const pluginInfo = await handlePluginInfo(options, pluginMetaDir, split, infoUrl);
         if (pluginInfo) {
             if ((typeof pluginInfo.slug !== 'string') ||
                 (typeof pluginInfo.error === 'string') ||
                 (typeof pluginInfo.download_link !== 'string')) {
                 ok = false;
             } else {
-                const fileInfo = await downloadPluginZip(pluginInfo.download_link, pluginDir);
+                const fileInfo = await downloadPluginZip(pluginInfo.download_link, pluginReadOnlyDir);
                 ok = ok && (fileInfo.status === 'full');
                 files[fileInfo.filename] = fileInfo;
                 if (options.full) {
                     if (typeof pluginInfo.versions === 'object') {
                         for (const version of Object.keys(pluginInfo.versions)) {
-                            if (version !== 'trunk') {
-                                const fileInfo = await downloadPluginZip(pluginInfo.versions[version], pluginDir);
+                            if ((version !== 'trunk') && pluginInfo.versions[version]) {
+                                const fileInfo = await downloadPluginZip(pluginInfo.versions[version], pluginReadOnlyDir);
                                 files[fileInfo.filename] = fileInfo;
                                 ok = ok && (fileInfo.status === 'full');
                             }
                         }
                     }
                     if ((typeof pluginInfo.screenshots === 'object') && !Array.isArray(pluginInfo.screenshots)) {
-                        const screenshotsDir = path.join(pluginDir, 'screenshots');
+                        const screenshotsDir = path.join(pluginLiveDir, 'screenshots');
                         reporter(`> mkdir -p ${screenshotsDir}`);
                         await Deno.mkdir(screenshotsDir, { recursive: true });
                         for (const id of Object.keys(pluginInfo.screenshots)) {
@@ -233,29 +270,29 @@ async function processPlugin(options: CommandOptions, prefixLength: number, slug
                                 const src = new URL(pluginInfo.screenshots[id]?.src);
                                 const filename = src.pathname.substring(src.pathname.lastIndexOf('/')+1);
                                 const screenshot = path.join(screenshotsDir, filename);
-                                const fileInfo = await downloadFile(reporter, src, screenshot, force);
+                                const fileInfo = await downloadFile(reporter, src, screenshot, options.force, options.update);
                                 files[fileInfo.filename] = fileInfo;
                                 ok = ok && (fileInfo.status === 'full');
                             }
                         }
                     }
                     if ((typeof pluginInfo.banners === 'object') && !Array.isArray(pluginInfo.banners)) {
-                        const bannersDir = path.join(pluginDir, 'banners');
+                        const bannersDir = path.join(pluginLiveDir, 'banners');
                         reporter(`> mkdir -p ${bannersDir}`);
                         await Deno.mkdir(bannersDir, { recursive: true });
                         if (typeof pluginInfo.banners?.high === 'string') {
                             const src = new URL(pluginInfo.banners.high);
                             const filename = src.pathname.substring(src.pathname.lastIndexOf('/')+1);
                             const screenshot = path.join(bannersDir, filename);
-                            const fileInfo = await downloadFile(reporter, src, screenshot, force);
+                            const fileInfo = await downloadFile(reporter, src, screenshot, options.force, options.update);
                             files[fileInfo.filename] = fileInfo;
                             ok = ok && (fileInfo.status === 'full');
-                    }
+                        }
                         if (typeof pluginInfo.banners?.low === 'string') {
                             const src = new URL(pluginInfo.banners.low);
                             const filename = src.pathname.substring(src.pathname.lastIndexOf('/')+1);
                             const screenshot = path.join(bannersDir, filename);
-                            const fileInfo = await downloadFile(reporter, src, screenshot, force);
+                            const fileInfo = await downloadFile(reporter, src, screenshot, options.force, options.update);
                             files[fileInfo.filename] = fileInfo;
                             ok = ok && (fileInfo.status === 'full');
                         }
@@ -286,6 +323,97 @@ function getPluginInfoUrl(apiHost: string, name: string): URL {
     url.searchParams.append('action', 'plugin_information');
     url.searchParams.append('slug', name);
     return url;
+}
+
+/**
+ *
+ * @param options command-line options.
+ * @param prefixLength number of characters in prefix of split filename.
+ * @param pluginSlugs list of plugin slugs.
+ */
+async function downloadFiles(options: CommandOptions, prefixLength: number, pluginSlugs: Array<string>): Promise<void> {
+    const statusFilename = path.join(options.pluginsDir, options.statusFilename);
+    const status = await readDownloadStatus(statusFilename, pluginSlugs);
+    let ok: boolean = true;
+    let soFar: number = 0;
+    let success: number = 0;
+    let failure: number = 0;
+    let skipped: number = 0;
+    let needed: boolean = false;
+    let changed: boolean = false;
+    for (const slug of pluginSlugs) {
+        needed = false;
+        if (typeof status.map[slug] !== 'object') {
+            status.map[slug] = { status: 'unknown', when: 0, files: {} };
+        }
+        if ((typeof status.map[slug] === 'object') &&
+            (typeof status.map[slug]?.status === 'string') &&
+            (typeof status.map[slug]?.when === 'number')) {
+            switch (status.map[slug]?.status) {
+                case 'unknown':
+                    needed = true;
+                    break;
+                case 'partial':
+                    needed = options.full;
+                    break;
+                case 'full':
+                    needed = false;
+                    break;
+                case 'failed':
+                    needed = options.retry;
+                    break;
+                default:
+                    console.error(`Error: unrecognized status. slug=${slug}, status=${status.map[slug]?.status}`);
+                    break;
+            }
+            soFar += 1;
+            if (needed || options.force) {
+                const pluginStatus = await processPlugin(options, prefixLength, slug);
+                if ((pluginStatus.status === 'full') || (pluginStatus.status === 'partial')) {
+                    success += 1;
+                } else if (pluginStatus.status === 'failed') {
+                    failure += 1;
+                } else {
+                    console.error(`Warning: unknown status after processPlugin: slug=${slug}`);
+                }
+                changed = true;
+                status.map[slug] = pluginStatus;
+                const existing = status.map[slug].files;
+                status.map[slug].status = pluginStatus.status;
+                status.map[slug].when = pluginStatus.when;
+                status.map[slug].files = {};
+                for (const name in pluginStatus.files) {
+                    status.map[slug].files[name] = mergeDownloadInfo(existing[name], pluginStatus.files[name]);
+                }
+
+                ok = ok && (pluginStatus.status !== 'failed');
+            } else {
+                skipped += 1;
+            }
+        } else {
+            console.error(`Error: unknown status: slug=${slug}`);
+        }
+        if ((soFar % 10) == 0) {
+            if (changed) {
+                reporter(`save status > ${statusFilename}`);
+                ok = await saveDownloadStatus(statusFilename, status) && ok;
+            }
+            changed = false;
+            reporter('');
+            reporter(`plugins processed:  ${soFar}`);
+            reporter(`successful:         ${success}`);
+            reporter(`failures:           ${failure}`);
+            reporter(`skipped:            ${skipped}`);
+        }
+    }
+    status.when = Date.now();
+    reporter(`save status > ${statusFilename}`);
+    ok = await saveDownloadStatus(statusFilename, status) && ok;
+
+    reporter(`Total plugins processed:  ${soFar}`);
+    reporter(`Total successful:         ${success}`);
+    reporter(`Total failures:           ${failure}`);
+    reporter(`Total skipped:            ${skipped}`);
 }
 
 /**
@@ -325,13 +453,13 @@ async function main(argv: Array<string>): Promise<number> {
         console.error(`Error: network access is required to repoHost ${options.downloadsHost}`);
         return 1;
     }
-    const pluginNames = await getPluginSlugs(`https://${options.repoHost}/`);
+    const pluginNames = await getPluginSlugs(`https://${options.repoHost}/`, options.DEBUG_USE_FIXED_PLUGIN_SLUGS);
     if (pluginNames.length === 0) {
         console.error(`Error: no plugins found`);
         return 1;
     }
     reporter(`plugins found:     ${pluginNames.length}`);
-    //reporter({pluginNames});
+
     const prefixLength = parseInt(options.prefixLength);
     if (isNaN(prefixLength)) {
         console.error(`Error: prefixLength=${options.prefixLength} is not a valid integer`);
@@ -344,81 +472,9 @@ async function main(argv: Array<string>): Promise<number> {
         printSplitSummary(pluginNames, 4);
         return 0;
     }
-    const statusFilename = path.join(options.pluginsDir, options.statusFilename);
-    const status = await readDownloadStatus(statusFilename, pluginNames);
-    let ok: boolean = true;
-    let soFar: number = 0;
-    let success: number = 0;
-    let failure: number = 0;
-    let skipped: number = 0;
-    let needed: boolean = false;
-    for (const slug of pluginNames) {
-        needed = false;
-        if (typeof status.map[slug] !== 'object') {
-            status.map[slug] = { status: 'unknown', when: 0, files: {} };
-        }
-        if ((typeof status.map[slug] === 'object') &&
-            (typeof status.map[slug]?.status === 'string') &&
-            (typeof status.map[slug]?.when === 'number')) {
-            switch (status.map[slug]?.status) {
-                case 'unknown':
-                    needed = true;
-                    break;
-                case 'partial':
-                    needed = options.full;
-                    break;
-                case 'full':
-                    needed = false;
-                    break;
-                case 'failed':
-                    needed = options.update;
-                    break;
-                default:
-                    console.error(`Error: unrecognized status. slug=${slug}, status=${status.map[slug]?.status}`);
-                    break;
-            }
-            soFar += 1;
-            if (needed || options.initial) {
-                const pluginStatus = await processPlugin(options, prefixLength, slug, options.initial || options.update);
-                if ((pluginStatus.status === 'full') || (pluginStatus.status === 'partial')) {
-                    success += 1;
-                } else if (pluginStatus.status === 'failed') {
-                    failure += 1;
-                } else {
-                    console.error(`Warning: unknown status after processPlugin: slug=${slug}`);
-                }
-                status.map[slug] = pluginStatus;
-                ok = ok && (pluginStatus.status !== 'failed');
-            } else {
-                skipped += 1;
-            }
-        } else {
-            console.error(`Error: unknown status: slug=${slug}`);
-        }
-        if ((soFar % 10) == 0) {
-            reporter(`save status > ${statusFilename}`);
-            ok = await saveDownloadStatus(statusFilename, status) && ok;
-            reporter('');
-            reporter(`plugins processed:  ${soFar}`);
-            reporter(`successful:         ${success}`);
-            reporter(`failures:           ${failure}`);
-            reporter(`skipped:            ${skipped}`);
-            reporter(`ok:                 ${ok}`);
-        }
-    }
-    status.when = Date.now();
-    reporter(`save status > ${statusFilename}`);
-    ok = await saveDownloadStatus(statusFilename, status) && ok;
 
-    reporter(`Total plugins processed:  ${soFar}`);
-    reporter(`Total successful:         ${success}`);
-    reporter(`Total failures:           ${failure}`);
-    reporter(`Total skipped:            ${skipped}`);
-    reporter(`ok:                       ${ok}`);
+    await downloadFiles(options, prefixLength, pluginNames);
 
-    if (!ok) {
-        return 1;
-    }
     return 0;
 }
 

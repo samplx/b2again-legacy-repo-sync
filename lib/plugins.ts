@@ -15,6 +15,8 @@
  */
 'use strict';
 
+import { escape } from "jsr:@std/regexp";
+
 /**
  * Plugin contributor information.
  */
@@ -71,7 +73,7 @@ export interface PluginInfo {
     upgrade_notice?: Record<string, string>;
     screenshots?: Record<string, ScreenshotInfo>;
     tags?: Record<string, string>;
-    versions?: Record<string, string>;
+    versions?: Record<string, undefined | string>;
     business_model?: boolean | string;
     repository_url?: string;
     commercial_support_url?: string;
@@ -80,21 +82,120 @@ export interface PluginInfo {
     preview_link?: string;
 }
 
+function getBannerUrl(downloadsBaseUrl: string, split: string, url: string): string {
+    const screenshot = getBasename(url);
+    return new URL(`/plugins/live/legacy/${split}/banners/${screenshot}`, downloadsBaseUrl).toString();
+}
+
+function getBasename(url: string): string {
+    return url.substring(url.lastIndexOf('/')+1);
+}
+
+function getHomepageUrl(supportBaseUrl: string, slug: string): string {
+    return new URL(`/homepages/plugins/legacy/${slug}/`, supportBaseUrl).toString();
+}
+
+function getPreviewUrl(downloadsBaseUrl: string, split: string): string {
+    return new URL(`/plugins/live/legacy/${split}/preview/index.html`, downloadsBaseUrl).toString();
+}
+
+function getScreenshotUrl(downloadsBaseUrl: string, split: string, url: string): string {
+    const screenshot = getBasename(url);
+    const kleen =  new URL(`/plugins/live/legacy/${split}/screenshots/${screenshot}`, downloadsBaseUrl);
+    kleen.search = '';
+    return kleen.toString();
+}
+
+function getSupportUrl(supportBaseUrl: string, slug: string): string {
+    return new URL(`/support/plugins/legacy/${slug}/`, supportBaseUrl).toString();
+}
+
+function getZipUrl(downloadsBaseUrl: string, split: string, existing: string): string {
+    const filename = getBasename(existing);
+    return new URL(`/plugins/read-only/legacy/${split}/${filename}`, downloadsBaseUrl).toString();
+
+}
+
+function isWordpressOrg(url: string): boolean {
+    return url.startsWith('https://wordpress.org/') || url.startsWith('http://wordpress.org/');
+}
+
+
 /**
  * Redact content from plugin information.
  * @param input source plugin information.
  * @returns plugin information with selected fields redacted/zero'd.
  */
-export function sanitizePluginInfo(input: PluginInfo): PluginInfo {
-    const result = { ... input};
-    result.rating = 0;
-    result.ratings = {'1': 0, '2': 0, '3': 0, '4': 0, '5': 0};
-    result.num_ratings = 0;
-    result.support_threads = 0;
-    result.support_threads_resolved = 0;
-    result.active_installs = 0;
-    if (typeof result.sections?.reviews === 'string') {
-        result.sections.reviews = undefined;
+export function migratePluginInfo(downloadsBaseUrl: string,
+    supportBaseUrl: string,
+    split: string,
+    input: PluginInfo): PluginInfo {
+    const kleen = { ... input};
+    const screenshotMap: Record<string, string> = {};
+
+    kleen.active_installs = 0;
+    if (kleen.banners && !Array.isArray(kleen.banners)) {
+        kleen.banners = { ...kleen.banners };
+        if (typeof kleen.banners?.high === 'string') {
+            kleen.banners.high = getBannerUrl(downloadsBaseUrl, split, kleen.banners.high);
+        }
+        if (typeof kleen.banners?.low === 'string') {
+            kleen.banners.low = getBannerUrl(downloadsBaseUrl, split, kleen.banners.low);
+        }
     }
-    return result;
+    if (kleen.download_link) {
+        kleen.download_link = getZipUrl(downloadsBaseUrl, split, kleen.download_link);
+    }
+    if (kleen.homepage && kleen.slug && isWordpressOrg(kleen.homepage)) {
+        kleen.homepage = getHomepageUrl(supportBaseUrl, kleen.slug);
+    }
+    kleen.num_ratings = 0;
+    if (kleen.preview_link) {
+        kleen.preview_link = getPreviewUrl(downloadsBaseUrl, split);
+    }
+    kleen.rating = 0;
+    kleen.ratings = {'1': 0, '2': 0, '3': 0, '4': 0, '5': 0};
+    if (kleen.screenshots) {
+        // kleen is a shallow copy, deepen it before we mutate it
+        kleen.screenshots = { ...kleen.screenshots };
+        for (const key in kleen.screenshots) {
+            if (kleen.screenshots[key].src) {
+                const updated = getScreenshotUrl(downloadsBaseUrl, split, kleen.screenshots[key].src ?? '--should-not-happen-famous-last-words--');
+                screenshotMap[kleen.screenshots[key].src] = updated;
+                kleen.screenshots[key].src = updated;
+            }
+        }
+    }
+    if (kleen.sections) {
+        kleen.sections = { ...kleen.sections };
+        if (typeof kleen.sections?.reviews === 'string') {
+            kleen.sections.reviews = undefined;
+        }
+        if (typeof kleen.sections?.screenshots === 'string') {
+            let contents = kleen.sections.screenshots;
+            for (const old in screenshotMap) {
+                const search = new RegExp(escape(old), 'g');
+                const replacement = screenshotMap[old];
+                contents = contents.replaceAll(search, replacement);
+            }
+            kleen.sections.screenshots = contents;
+        }
+    }
+    kleen.support_threads = 0;
+    kleen.support_threads_resolved = 0;
+    if (kleen.support_url && kleen.slug && isWordpressOrg(kleen.support_url)) {
+        kleen.support_url = getSupportUrl(supportBaseUrl, kleen.slug);
+    }
+    if (kleen.versions) {
+        // kleen is a shallow copy, deepen it before we mutate it
+        kleen.versions = { ...kleen.versions };
+        for (const version in kleen.versions) {
+            if (version === 'trunk') {
+                kleen.versions['trunk'] = undefined;
+            } else if (kleen.versions[version]) {
+                kleen.versions[version] = getZipUrl(downloadsBaseUrl, split, kleen.versions[version]);
+            }
+        }
+    }
+    return kleen;
 }
