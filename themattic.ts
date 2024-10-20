@@ -269,7 +269,18 @@ async function getThemeSlugs(listUrl: string, fixedList: boolean = false): Promi
  */
 async function downloadThemeZip(options: CommandOptions, sourceUrl: string, themeDir: string): Promise<DownloadFileInfo> {
     const zipFilename = path.join(themeDir, sourceUrl.substring(sourceUrl.lastIndexOf('/')+1));
-    return await downloadFile(reporter, new URL(sourceUrl), zipFilename, options.force, options.update);
+    try {
+        await Deno.chmod(zipFilename, 0o644);
+    } catch (_) {
+        // ignored, wait for download to fail.
+    }
+    const info = await downloadFile(reporter, new URL(sourceUrl), zipFilename, options.force, options.update);
+    try {
+        await Deno.chmod(zipFilename, 0o444);
+    } catch (_) {
+        reporter(`Warning: chmod(${zipFilename}, 0o444) failed`);
+    }
+    return info;
 }
 
 /**

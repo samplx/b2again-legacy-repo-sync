@@ -173,9 +173,20 @@ async function getPluginSlugs(listUrl: string, useFixedList: boolean = false): P
  * @param pluginDir where to put the zip file.
  * @returns true if download was successful, false if not.
  */
-async function downloadPluginZip(sourceUrl: string, pluginDir: string): Promise<DownloadFileInfo> {
+async function downloadPluginZip(options: CommandOptions, sourceUrl: string, pluginDir: string): Promise<DownloadFileInfo> {
     const zipFilename = path.join(pluginDir, sourceUrl.substring(sourceUrl.lastIndexOf('/')+1));
-    return await downloadFile(reporter, new URL(sourceUrl), zipFilename);
+    try {
+        await Deno.chmod(zipFilename, 0o644);
+    } catch (_) {
+        // ignored, wait for download to fail.
+    }
+    const info = await downloadFile(reporter, new URL(sourceUrl), zipFilename, options.force, options.update);
+    try {
+        await Deno.chmod(zipFilename, 0o444);
+    } catch (_) {
+        reporter(`Warning: chmod(${zipFilename}, 0o444) failed`);
+    }
+    return info;
 }
 
 /**
@@ -245,14 +256,14 @@ async function processPlugin(options: CommandOptions, prefixLength: number, slug
                 (typeof pluginInfo.download_link !== 'string')) {
                 ok = false;
             } else {
-                const fileInfo = await downloadPluginZip(pluginInfo.download_link, pluginReadOnlyDir);
+                const fileInfo = await downloadPluginZip(options, pluginInfo.download_link, pluginReadOnlyDir);
                 ok = ok && (fileInfo.status === 'full');
                 files[fileInfo.filename] = fileInfo;
                 if (options.full) {
                     if (typeof pluginInfo.versions === 'object') {
                         for (const version of Object.keys(pluginInfo.versions)) {
                             if ((version !== 'trunk') && pluginInfo.versions[version]) {
-                                const fileInfo = await downloadPluginZip(pluginInfo.versions[version], pluginReadOnlyDir);
+                                const fileInfo = await downloadPluginZip(options, pluginInfo.versions[version], pluginReadOnlyDir);
                                 files[fileInfo.filename] = fileInfo;
                                 ok = ok && (fileInfo.status === 'full');
                             }
