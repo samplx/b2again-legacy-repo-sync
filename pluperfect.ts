@@ -35,7 +35,7 @@ import { ConsoleReporter, VERBOSE_CONSOLE_REPORTER, QUIET_CONSOLE_REPORTER } fro
 /** how the script describes itself. */
 const PROGRAM_NAME: string = 'pluperfect';
 /** current semver */
-const VERSION: string = '0.1.0';
+const VERSION: string = '0.1.1';
 
 /** Poor implementation of an Either for the download results. */
 type PluginDownloadResult = DownloadErrorInfo & PluginInfo;
@@ -63,6 +63,9 @@ interface CommandOptions {
 
     /** true if all missing files should be downloaded. */
     full: boolean;
+
+    /** true if user requested help. */
+    help: boolean;
 
     /** how many spaces between elements in JSON. */
     jsonSpaces: string;
@@ -112,6 +115,7 @@ const parseOptions: ParseOptions = {
         downloadsHost: 'downloads.wordpress.org',
         force: false,
         full: false,
+        help: false,
         jsonSpaces: '    ',
         pluginsDir: 'plugins',
         prefixLength: '2',
@@ -127,6 +131,7 @@ const parseOptions: ParseOptions = {
     boolean: [
         'force',
         'full',
+        'help',
         'quiet',
         'retry',
         'update',
@@ -430,6 +435,47 @@ async function downloadFiles(options: CommandOptions, prefixLength: number, plug
 }
 
 /**
+ * Provide help to the user.
+ */
+function printHelp(): void {
+    console.log(`${PROGRAM_NAME} [options]`);
+    console.log();
+    console.log(`Options include [default value]:`);
+    console.log(`--apiHost=host             [${parseOptions.default?.apiHost}]`);
+    console.log(`    define where to load plugin data.`);
+    console.log(`--downloadsBaseUrl=url     [${parseOptions.default?.downloadsBaseUrl}]`);
+    console.log(`    define downstream downloads host.`);
+    console.log(`--downloadsHost=host       [${parseOptions.default?.downloadsHost}]`);
+    console.log(`    define where to load plugin zip files.`);
+    console.log(`--force                    [${parseOptions.default?.force}]`);
+    console.log(`    force download of files.`);
+    console.log(`--full                     [${parseOptions.default?.full}]`);
+    console.log(`    full archive. include all versions, screenshots, and banners`);
+    console.log(`--help`);
+    console.log(`    print this message and exit.`);
+    console.log(`--jsonSpaces=spaces        [${parseOptions.default?.jsonSpaces}]`);
+    console.log(`    spaces used to delimit generated JSON files.`);
+    console.log(`--pluginsDir=dir           [${parseOptions.default?.pluginsDir}]`);
+    console.log(`    define where save files (must end with "plugins").`);
+    console.log(`--prefixLength=number      [${parseOptions.default?.prefixLength}]`);
+    console.log(`    number of characters in directory prefix.`);
+    console.log(`--quiet                    [${parseOptions.default?.quiet}]`);
+    console.log(`    be quiet. supress non-error messages.`);
+    console.log(`--repoHost=host            [${parseOptions.default?.repoHost}]`);
+    console.log(`    define where to load list of plugins from subversion.`);
+    console.log(`--retry                    [${parseOptions.default?.retry}]`);
+    console.log(`    retry to download failed files.`);
+    console.log(`--statusFilename=name      [${parseOptions.default?.statusFilename}]`);
+    console.log(`    define where to save status information.`);
+    console.log(`--supportBaseUrl=url       [${parseOptions.default?.supportBaseUrl}]`);
+    console.log(`    define downstream support host.`);
+    console.log(`--update                   [${parseOptions.default?.update}]`);
+    console.log(`    recalculate message digests (hashes).`);
+    console.log(`--version`);
+    console.log(`    print program version and exit.`);
+}
+
+/**
  *
  * @param argv arguments passed after the `deno run -N pluperfect.ts`
  * @returns 0 if ok, 1 on error, 2 on usage errors.
@@ -439,6 +485,10 @@ async function main(argv: Array<string>): Promise<number> {
 
     if (options.version) {
         console.log(`${PROGRAM_NAME} version ${VERSION}`);
+        return 0;
+    }
+    if (options.help) {
+        printHelp();
         return 0;
     }
     if (options.quiet) {
