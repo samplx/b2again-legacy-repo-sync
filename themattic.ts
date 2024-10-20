@@ -93,6 +93,9 @@ interface CommandOptions {
     /** flag indicating an update operation. */
     update: boolean;
 
+    /** flag indicating a request to print the version. */
+    version: boolean;
+
     DEBUG_USE_FIXED_THEME_SLUGS: boolean;
 
     /** rest of the arguments of the command-line. */
@@ -115,6 +118,7 @@ const parseOptions: ParseOptions = {
         supportBaseUrl: 'https://support.b2again.org/',
         themesDir: 'themes',
         update: false,
+        version: false,
         DEBUG_USE_FIXED_THEME_SLUGS: false,
     },
     boolean: [
@@ -123,6 +127,7 @@ const parseOptions: ParseOptions = {
         'quiet',
         'retry',
         'update',
+        'version',
         'DEBUG_USE_FIXED_THEME_SLUGS'
     ],
     string: [
@@ -334,6 +339,10 @@ async function handleThemeInfo(
 async function main(argv: Array<string>): Promise<number> {
     const options: CommandOptions = parseArgs(argv, parseOptions);
 
+    if (options.version) {
+        console.log(`${PROGRAM_NAME} version ${VERSION}`);
+        return 0;
+    }
     if (options.quiet) {
         reporter = QUIET_CONSOLE_REPORTER;
     }
