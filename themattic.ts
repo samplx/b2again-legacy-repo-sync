@@ -35,7 +35,10 @@ import { ConsoleReporter, VERBOSE_CONSOLE_REPORTER, QUIET_CONSOLE_REPORTER } fro
 /** how the script describes itself. */
 const PROGRAM_NAME: string = 'themattic';
 /** current semver */
-const VERSION: string = '0.1.1';
+const VERSION: string = '0.1.2';
+
+/** default number of items processed between saves of the status file. */
+const DEFAULT_PACE: number = 25;
 
 /**
  * A simple Either-like structure to capture the results of a download.
@@ -71,6 +74,9 @@ interface CommandOptions {
 
     /** spaces when rendering JSON. */
     jsonSpaces: string;
+
+    /** number of items processed between saves of the status file (as a string). */
+    pace: string;
 
     /** how many characters to put in the directory prefix (as a string). */
     prefixLength: string;
@@ -115,6 +121,7 @@ const parseOptions: ParseOptions = {
         full: false,
         help: false,
         jsonSpaces: '    ',
+        pace: `${DEFAULT_PACE}`,
         prefixLength: '2',
         quiet: false,
         repoHost: 'themes.svn.wordpress.org',
@@ -140,6 +147,7 @@ const parseOptions: ParseOptions = {
         'apiHost',
         'downloadsHost',
         'jsonSpaces',
+        'pace',
         'prefixLength',
         'repoHost',
         'statusFilename',
@@ -355,6 +363,11 @@ async function downloadFiles(options: CommandOptions, prefixLength: number, them
     let skipped: number = 0;
     let needed: boolean = false;
     let changed: boolean = false;
+    let pace: number = parseInt(options.pace);
+    if (isNaN(pace)) {
+        pace = DEFAULT_PACE;
+        console.error(`Warning: unable to parse ${options.pace} as an integer. default ${pace} is used`);
+    }
     for (const slug of themeSlugs) {
         needed = false;
         if (typeof status.map[slug] !== 'object') {
@@ -410,7 +423,7 @@ async function downloadFiles(options: CommandOptions, prefixLength: number, them
         } else {
             console.error(`Error: unknown status: slug=${slug}`);
         }
-        if ((soFar % 10) == 0) {
+        if ((soFar % pace) == 0) {
             if (changed) {
                 reporter(`save status > ${statusFilename}`);
                 ok = await saveDownloadStatus(statusFilename, status) && ok;
@@ -454,6 +467,8 @@ function printHelp(): void {
     console.log(`    print this message and exit.`);
     console.log(`--jsonSpaces=spaces        [${parseOptions.default?.jsonSpaces}]`);
     console.log(`    spaces used to delimit generated JSON files.`);
+    console.log(`--pace=number              [${parseOptions.default?.pace}]`);
+    console.log(`    number of items processed between status file saves.`);
     console.log(`--prefixLength=number      [${parseOptions.default?.prefixLength}]`);
     console.log(`    number of characters in directory prefix.`);
     console.log(`--quiet                    [${parseOptions.default?.quiet}]`);

@@ -37,6 +37,9 @@ const PROGRAM_NAME: string = 'pluperfect';
 /** current semver */
 const VERSION: string = '0.1.1';
 
+/** default number of items processed between saves of the status file. */
+const DEFAULT_PACE: number = 25;
+
 /** Poor implementation of an Either for the download results. */
 type PluginDownloadResult = DownloadErrorInfo & PluginInfo;
 
@@ -69,6 +72,9 @@ interface CommandOptions {
 
     /** how many spaces between elements in JSON. */
     jsonSpaces: string;
+
+    /** number of items processed between saves of the status file (as a string). */
+    pace: string;
 
     /** top-level directory where plugins are to be stored. */
     pluginsDir: string;
@@ -117,6 +123,7 @@ const parseOptions: ParseOptions = {
         full: false,
         help: false,
         jsonSpaces: '    ',
+        pace: `${DEFAULT_PACE}`,
         pluginsDir: 'plugins',
         prefixLength: '2',
         quiet: false,
@@ -143,6 +150,7 @@ const parseOptions: ParseOptions = {
         'downloadsBaseUrl',
         'downloadsHost',
         'jsonSpaces',
+        'pace',
         'pluginsDir',
         'prefixLength',
         'repoHost',
@@ -359,6 +367,11 @@ async function downloadFiles(options: CommandOptions, prefixLength: number, plug
     let skipped: number = 0;
     let needed: boolean = false;
     let changed: boolean = false;
+    let pace: number = parseInt(options.pace);
+    if (isNaN(pace)) {
+        pace = DEFAULT_PACE;
+        console.error(`Warning: unable to parse ${options.pace} as an integer. default ${pace} is used`);
+    }
     for (const slug of pluginSlugs) {
         needed = false;
         if (typeof status.map[slug] !== 'object') {
@@ -411,7 +424,7 @@ async function downloadFiles(options: CommandOptions, prefixLength: number, plug
         } else {
             console.error(`Error: unknown status: slug=${slug}`);
         }
-        if ((soFar % 10) == 0) {
+        if ((soFar % pace) == 0) {
             if (changed) {
                 reporter(`save status > ${statusFilename}`);
                 ok = await saveDownloadStatus(statusFilename, status) && ok;
@@ -455,6 +468,8 @@ function printHelp(): void {
     console.log(`    print this message and exit.`);
     console.log(`--jsonSpaces=spaces        [${parseOptions.default?.jsonSpaces}]`);
     console.log(`    spaces used to delimit generated JSON files.`);
+    console.log(`--pace=number              [${parseOptions.default?.pace}]`);
+    console.log(`    number of items processed between status file saves.`);
     console.log(`--pluginsDir=dir           [${parseOptions.default?.pluginsDir}]`);
     console.log(`    define where save files (must end with "plugins").`);
     console.log(`--prefixLength=number      [${parseOptions.default?.prefixLength}]`);
