@@ -16,6 +16,9 @@
 'use strict';
 
 
+/**
+ * An "expanded" Author.
+ */
 export interface ThemeAuthor {
     user_nicename?: string;
     profile?: boolean | string;
@@ -23,6 +26,15 @@ export interface ThemeAuthor {
     display_name?: string;
     author?: boolean | string;
     author_url?: boolean | string;
+}
+
+/**
+ * Description of a parent theme.
+ */
+export interface ThemeParent {
+    slug?: string;
+    name?: string;
+    homepage?: string;
 }
 
 export interface ThemeInfo {
@@ -42,10 +54,13 @@ export interface ThemeInfo {
     last_updated_time?: string;
     creation_time?: string;
     homepage?: string;
+    description?: undefined | string;
     sections?: Record<string, string>;
     download_link?: string;
     tags?: Record<string, string>;
     versions?: Record<string, string>;
+    template?: string;
+    parent?: ThemeParent;
     requires?: boolean | string;
     requires_php?: boolean | string;
     is_commercial?: boolean;
@@ -113,6 +128,16 @@ export function migrateThemeInfo(downloadsBaseUrl: string,
         for (const version in kleen.versions) {
             kleen.versions[version] = getZipUrl(downloadsBaseUrl, themeReadOnlyDir, kleen.versions[version]);
         }
+    }
+    if (typeof kleen.description === 'string') {
+        if (kleen.sections) {
+            // deepen copy before mutation
+            kleen.sections = { ... kleen.sections };
+            kleen.sections.description = kleen.description;
+        } else {
+            kleen.sections = { description : kleen.description };
+        }
+        kleen.description = undefined;
     }
     kleen.rating = 0;
     kleen.ratings = { '1': 0, '2': 0, '3': 0, '4': 0, '5': 0 };

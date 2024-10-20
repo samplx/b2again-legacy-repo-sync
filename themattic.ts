@@ -241,6 +241,8 @@ function getThemeInfoUrl(apiHost: string, name: string): URL {
     url.searchParams.append('fields[]','ratings');
     url.searchParams.append('fields[]','active_installs');
     url.searchParams.append('fields[]','sections');
+    url.searchParams.append('fields[]','parent');
+    url.searchParams.append('fields[]','template');
     return url;
 }
 
@@ -332,65 +334,12 @@ async function handleThemeInfo(
 }
 
 /**
- *
- * @param argv arguments passed after the `deno run -N pluperfect.ts`
- * @returns 0 if ok, 1 on error, 2 on usage errors.
+ * Download all of the theme files.
+ * @param options command-line options.
+ * @param prefixLength number of characters in prefix of split filename.
+ * @param themeSlugs list of plugin slugs.
  */
-async function main(argv: Array<string>): Promise<number> {
-    const options: CommandOptions = parseArgs(argv, parseOptions);
-
-    if (options.version) {
-        console.log(`${PROGRAM_NAME} version ${VERSION}`);
-        return 0;
-    }
-    if (options.quiet) {
-        reporter = QUIET_CONSOLE_REPORTER;
-    }
-    reporter(`${PROGRAM_NAME} v${VERSION}`);
-    const writeAccess = await Deno.permissions.request({ name: 'write', path: options.themesDir});
-    if (writeAccess.state !== 'granted') {
-        console.error(`Error: write access is required to themesDir ${options.themesDir}`);
-        return 1;
-    }
-    const buildAccess = await Deno.permissions.request({ name: 'read', path: options.themesDir});
-    if (buildAccess.state !== 'granted') {
-        console.error(`Error: read access is required to themesDir ${options.themesDir}`);
-        return 1;
-    }
-    const apiAccess = await Deno.permissions.request({ name: 'net', host: options.apiHost});
-    if (apiAccess.state !== 'granted') {
-        console.error(`Error: network access is required to apiHost ${options.apiHost}`);
-        return 1;
-    }
-    const repoAccess = await Deno.permissions.request({ name: 'net', host: options.repoHost});
-    if (repoAccess.state !== 'granted') {
-        console.error(`Error: network access is required to repoHost ${options.repoHost}`);
-        return 1;
-    }
-    const downloadsAccess = await Deno.permissions.request({ name: 'net', host: options.downloadsHost});
-    if (downloadsAccess.state !== 'granted') {
-        console.error(`Error: network access is required to repoHost ${options.downloadsHost}`);
-        return 1;
-    }
-    const themeSlugs = await getThemeSlugs(`https://${options.repoHost}/`, options.DEBUG_USE_FIXED_THEME_SLUGS);
-    if (themeSlugs.length === 0) {
-        console.error(`Error: no themes found`);
-        return 1;
-    }
-    reporter(`themes found:      ${themeSlugs.length}`);
-    //reporter({themeNames});
-    const prefixLength = parseInt(options.prefixLength);
-    if (isNaN(prefixLength)) {
-        console.error(`Error: prefixLength=${options.prefixLength} is not a valid integer`);
-        return 2;
-    }
-    if (prefixLength < 0) {
-        printSplitSummary(themeSlugs, 1);
-        printSplitSummary(themeSlugs, 2);
-        printSplitSummary(themeSlugs, 3);
-        printSplitSummary(themeSlugs, 4);
-        return 0;
-    }
+async function downloadFiles(options: CommandOptions, prefixLength: number, themeSlugs: Array<string>): Promise<void> {
     const statusFilename = path.join(options.themesDir, options.statusFilename);
     const status = await readDownloadStatus(statusFilename, themeSlugs);
     let ok: boolean = true;
@@ -476,10 +425,70 @@ async function main(argv: Array<string>): Promise<number> {
     reporter(`Total successful:         ${success}`);
     reporter(`Total failures:           ${failure}`);
     reporter(`Total skipped:            ${skipped}`);
+}
 
-    if (!ok) {
+/**
+ *
+ * @param argv arguments passed after the `deno run -N pluperfect.ts`
+ * @returns 0 if ok, 1 on error, 2 on usage errors.
+ */
+async function main(argv: Array<string>): Promise<number> {
+    const options: CommandOptions = parseArgs(argv, parseOptions);
+
+    if (options.version) {
+        console.log(`${PROGRAM_NAME} version ${VERSION}`);
+        return 0;
+    }
+    if (options.quiet) {
+        reporter = QUIET_CONSOLE_REPORTER;
+    }
+    reporter(`${PROGRAM_NAME} v${VERSION}`);
+    const writeAccess = await Deno.permissions.request({ name: 'write', path: options.themesDir});
+    if (writeAccess.state !== 'granted') {
+        console.error(`Error: write access is required to themesDir ${options.themesDir}`);
         return 1;
     }
+    const buildAccess = await Deno.permissions.request({ name: 'read', path: options.themesDir});
+    if (buildAccess.state !== 'granted') {
+        console.error(`Error: read access is required to themesDir ${options.themesDir}`);
+        return 1;
+    }
+    const apiAccess = await Deno.permissions.request({ name: 'net', host: options.apiHost});
+    if (apiAccess.state !== 'granted') {
+        console.error(`Error: network access is required to apiHost ${options.apiHost}`);
+        return 1;
+    }
+    const repoAccess = await Deno.permissions.request({ name: 'net', host: options.repoHost});
+    if (repoAccess.state !== 'granted') {
+        console.error(`Error: network access is required to repoHost ${options.repoHost}`);
+        return 1;
+    }
+    const downloadsAccess = await Deno.permissions.request({ name: 'net', host: options.downloadsHost});
+    if (downloadsAccess.state !== 'granted') {
+        console.error(`Error: network access is required to repoHost ${options.downloadsHost}`);
+        return 1;
+    }
+    const themeSlugs = await getThemeSlugs(`https://${options.repoHost}/`, options.DEBUG_USE_FIXED_THEME_SLUGS);
+    if (themeSlugs.length === 0) {
+        console.error(`Error: no themes found`);
+        return 1;
+    }
+    reporter(`themes found:      ${themeSlugs.length}`);
+    const prefixLength = parseInt(options.prefixLength);
+    if (isNaN(prefixLength)) {
+        console.error(`Error: prefixLength=${options.prefixLength} is not a valid integer`);
+        return 2;
+    }
+    if (prefixLength < 0) {
+        printSplitSummary(themeSlugs, 1);
+        printSplitSummary(themeSlugs, 2);
+        printSplitSummary(themeSlugs, 3);
+        printSplitSummary(themeSlugs, 4);
+        return 0;
+    }
+
+    await downloadFiles(options, prefixLength, themeSlugs);
+
     return 0;
 }
 
