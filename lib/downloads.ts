@@ -17,6 +17,8 @@
 
 import { crypto } from "jsr:@std/crypto/crypto";
 import { ConsoleReporter } from "./reporter.ts";
+import type { CommandOptions } from "./options.ts";
+import * as path from "jsr:@std/path";
 
 /**
  * Classification of a download group or file.
@@ -292,3 +294,25 @@ export function mergeDownloadInfo(existing: undefined | DownloadFileInfo, recent
     };
 }
 
+
+/**
+ * Download a zip file, if required.
+ * @param sourceUrl where to download the zip file.
+ * @param targetDir where to put the zip file.
+ * @returns true if download was successful, false if not.
+ */
+export async function downloadZip(reporter: ConsoleReporter, options: CommandOptions, sourceUrl: string, targetDir: string): Promise<DownloadFileInfo> {
+    const zipFilename = path.join(targetDir, sourceUrl.substring(sourceUrl.lastIndexOf('/')+1));
+    try {
+        await Deno.chmod(zipFilename, 0o644);
+    } catch (_) {
+        // ignored, wait for download to fail.
+    }
+    const info = await downloadFile(reporter, new URL(sourceUrl), zipFilename, options.force, options.rehash);
+    try {
+        await Deno.chmod(zipFilename, 0o444);
+    } catch (_) {
+        reporter(`Warning: chmod(${zipFilename}, 0o444) failed`);
+    }
+    return info;
+}
