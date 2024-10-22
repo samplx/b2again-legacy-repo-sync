@@ -361,6 +361,7 @@ async function main(argv: Array<string>): Promise<number> {
         vreporter = VERBOSE_CONSOLE_REPORTER;
     }
     vreporter(`${PROGRAM_NAME} v${VERSION}`);
+    vreporter(`started:   ${new Date().toUTCString()}`);
 
     // check for permissions
     const writeAccess = await Deno.permissions.request({ name: 'write', path: options.documentRoot});
@@ -419,6 +420,7 @@ async function main(argv: Array<string>): Promise<number> {
     }
 
     await downloadFiles(options, prefixLength, themeSlugs, themeList as Array<ThemeInfo>);
+    vreporter(`completed: ${new Date().toUTCString()}`);
 
     return 0;
 }
