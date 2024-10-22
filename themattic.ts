@@ -360,8 +360,8 @@ async function main(argv: Array<string>): Promise<number> {
     if (options.verbose) {
         vreporter = VERBOSE_CONSOLE_REPORTER;
     }
-    vreporter(`${PROGRAM_NAME} v${VERSION}`);
-    vreporter(`started:   ${new Date().toUTCString()}`);
+    reporter(`${PROGRAM_NAME} v${VERSION}`);
+    reporter(`started:   ${new Date().toUTCString()}`);
 
     // check for permissions
     const writeAccess = await Deno.permissions.request({ name: 'write', path: options.documentRoot});
@@ -420,7 +420,7 @@ async function main(argv: Array<string>): Promise<number> {
     }
 
     await downloadFiles(options, prefixLength, themeSlugs, themeList as Array<ThemeInfo>);
-    vreporter(`completed: ${new Date().toUTCString()}`);
+    reporter(`completed: ${new Date().toUTCString()}`);
 
     return 0;
 }
