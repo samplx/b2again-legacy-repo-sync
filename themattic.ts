@@ -31,19 +31,15 @@ import { parseArgs, ParseOptions } from "jsr:@std/cli/parse-args";
 import * as path from "jsr:@std/path";
 import { migrateThemeInfo, ThemeInfo } from "./lib/themes.ts";
 import { ConsoleReporter, VERBOSE_CONSOLE_REPORTER, QUIET_CONSOLE_REPORTER } from "./lib/reporter.ts";
+import { parse } from "jsr:@std/jsonc";
 
 /** how the script describes itself. */
 const PROGRAM_NAME: string = 'themattic';
 /** current semver */
-const VERSION: string = '0.1.2';
+const VERSION: string = '0.2.0';
 
 /** default number of items processed between saves of the status file. */
 const DEFAULT_PACE: number = 25;
-
-/**
- * A simple Either-like structure to capture the results of a download.
- */
-type ThemeDownloadResult = DownloadErrorInfo & ThemeInfo;
 
 /**
  * How to report non-errors.
@@ -51,11 +47,42 @@ type ThemeDownloadResult = DownloadErrorInfo & ThemeInfo;
 let reporter: ConsoleReporter = VERBOSE_CONSOLE_REPORTER;
 
 /**
+ * How to report verbose messages.
+ */
+let vreporter: ConsoleReporter = QUIET_CONSOLE_REPORTER;
+
+/**
+ * A simple Either-like structure to capture the results of a download.
+ */
+type ThemeDownloadResult = DownloadErrorInfo & ThemeInfo;
+
+type ThemeBrowseOptions = 'featured' | 'new' | 'popular' | 'updated';
+
+type ThemeListOptions =
+    'featured' | 'new' | 'popular' | 'updated' | 'defaults' | 'interesting' | 'subversion';
+
+type ThemeLists = Record<string, Array<ThemeInfo>>;
+
+interface QueryThemesInfo {
+    page: number,
+    pages: number,
+    results: number
+}
+
+interface QueryThemesResult {
+    info?: QueryThemesInfo;
+    themes: Array<ThemeInfo>;
+}
+
+/**
  * Results of parsing the command-line.
  */
 interface CommandOptions {
     /** where to get information */
     apiHost: string;
+
+    /** top-level directory where build results are to be stored. */
+    documentRoot: string;
 
     /** URL address of the base of the download tree. */
     downloadsBaseUrl: string;
@@ -72,8 +99,23 @@ interface CommandOptions {
     /** true if user requested help. */
     help: boolean;
 
+    /** name of a file containing the 'interesting' subset of themes. */
+    interestingFilename: string;
+
     /** spaces when rendering JSON. */
     jsonSpaces: string;
+
+    /** maximum number of themes in list (as an optional string). */
+    limit?: string;
+
+    /** which list are we using. */
+    list: ThemeListOptions;
+
+    /** if true, query API for lists of themes, and report on them. */
+    lists: boolean;
+
+    /** name of JSON file containing the lists from the API server. */
+    listsFilename: string;
 
     /** number of items processed between saves of the status file (as a string). */
     pace: string;
@@ -96,15 +138,20 @@ interface CommandOptions {
     /** URL address of the support server. */
     supportBaseUrl: string;
 
-    /** top-level directory where build results are to be stored. */
-    themesDir: string;
-
     /** flag indicating an update operation. */
     update: boolean;
+
+    /** flag indicating more verbose output is desired. */
+    verbose: boolean;
 
     /** flag indicating a request to print the version. */
     version: boolean;
 
+    /**
+     * a "hidden" flag used for debugging/testing.
+     * If true, use a fixed list of theme slugs rather
+     * than the large list from the subversion page.
+     */
     DEBUG_USE_FIXED_THEME_SLUGS: boolean;
 
     /** rest of the arguments of the command-line. */
@@ -115,12 +162,17 @@ interface CommandOptions {
 const parseOptions: ParseOptions = {
     default: {
         apiHost: 'api.wordpress.org',
+        documentRoot: 'build',
         downloadsBaseUrl: 'https://downloads.b2again.org/',
         downloadsHost: 'downloads.wordpress.org',
         force: false,
         full: false,
         help: false,
+        interestingFilename: 'interesting-themes.jsonc',
         jsonSpaces: '    ',
+        list: 'updated',
+        lists: false,
+        listsFilename: 'legacy-lists.json',
         pace: `${DEFAULT_PACE}`,
         prefixLength: '2',
         quiet: false,
@@ -128,8 +180,8 @@ const parseOptions: ParseOptions = {
         retry: false,
         statusFilename: 'themes-status.json',
         supportBaseUrl: 'https://support.b2again.org/',
-        themesDir: 'themes',
         update: false,
+        verbose: false,
         version: false,
         DEBUG_USE_FIXED_THEME_SLUGS: false,
     },
@@ -137,57 +189,72 @@ const parseOptions: ParseOptions = {
         'force',
         'full',
         'help',
+        'lists',
         'quiet',
         'retry',
         'update',
         'version',
+        'verbose',
         'DEBUG_USE_FIXED_THEME_SLUGS'
     ],
     string: [
         'apiHost',
+        'documentRoot',
         'downloadsHost',
+        'interestingFilename',
         'jsonSpaces',
+        'limit',
+        'list',
+        'listsFilename',
         'pace',
         'prefixLength',
         'repoHost',
         'statusFilename',
         'downloadsBaseUrl',
-        'supportBaseUrl',
-        'themesDir'
+        'supportBaseUrl'
     ],
     unknown: (arg: string): unknown => {
         console.error(`Warning: unrecognized option ignored '${arg}'`);
         return false;
     }
 }
+
 /**
- *
+ * Handle the downloading and processing of a single theme.
  * @param options command-line options.
  * @param prefixLength number of characters to use in the directory prefix.
  * @param slug theme slug.
  * @returns
  */
-async function processTheme(options: CommandOptions, prefixLength: number, slug: string): Promise<GroupDownloadInfo> {
-    const themeReadOnlyDir = path.join(options.themesDir, 'read-only', 'legacy', splitFilename(slug, prefixLength));
-    const themeMetaDir = path.join(options.themesDir, 'meta', 'legacy', splitFilename(slug, prefixLength));
-    const themeLiveDir = path.join(options.themesDir, 'live', 'legacy', splitFilename(slug, prefixLength));
+async function processTheme(
+        options: CommandOptions,
+        prefixLength: number,
+        slug: string,
+        outdated: boolean,
+        fromAPI: ThemeInfo
+    ): Promise<GroupDownloadInfo> {
+    const themeReadOnlyDir = path.join(options.documentRoot, 'themes', 'read-only', 'legacy', splitFilename(slug, prefixLength));
+    const themeMetaDir = path.join(options.documentRoot, 'themes', 'meta', 'legacy', splitFilename(slug, prefixLength));
+    const themeLiveDir = path.join(options.documentRoot, 'themes', 'live', 'legacy', splitFilename(slug, prefixLength));
 
     const files: Record<string, DownloadFileInfo> = {};
     const infoUrl = getThemeInfoUrl(options.apiHost, slug);
     let ok = true;
+    let last_updated_time;
     try {
-        reporter(`> mkdir -p ${themeReadOnlyDir}`);
+        vreporter(`> mkdir -p ${themeReadOnlyDir}`);
         await Deno.mkdir(themeReadOnlyDir, { recursive: true });
-        reporter(`> mkdir -p ${themeMetaDir}`);
+        vreporter(`> mkdir -p ${themeMetaDir}`);
         await Deno.mkdir(themeMetaDir, { recursive: true });
 
-        const themeInfo = await handleThemeInfo(options, themeLiveDir, themeMetaDir, themeReadOnlyDir, infoUrl);
+        const themeInfo = await handleThemeInfo(options, themeLiveDir, themeMetaDir, themeReadOnlyDir, infoUrl, outdated || options.force, fromAPI);
         if (themeInfo) {
             if ((typeof themeInfo.slug !== 'string') ||
                 (typeof themeInfo.error === 'string') ||
                 (typeof themeInfo.download_link !== 'string')) {
                 ok = false;
             } else {
+                last_updated_time = themeInfo.last_updated_time;
                 const zipFilename = path.join(themeReadOnlyDir, themeInfo.download_link.substring(themeInfo.download_link.lastIndexOf('/')+1));
                 const fileInfo = await downloadFile(reporter, new URL(themeInfo.download_link), zipFilename, options.force, options.update);
                 ok = ok && (fileInfo.status === 'full');
@@ -196,7 +263,7 @@ async function processTheme(options: CommandOptions, prefixLength: number, slug:
                     if (typeof themeInfo.preview_url === 'string') {
                         // preview_url
                         const previewDir = path.join(themeLiveDir, 'preview');
-                        reporter(`> mkdir -p ${previewDir}`);
+                        vreporter(`> mkdir -p ${previewDir}`);
                         await Deno.mkdir(previewDir, { recursive: true });
                         const previewIndex = path.join(previewDir, 'index.html');
                         const previewInfo = await downloadFile(reporter, new URL(themeInfo.preview_url), previewIndex, options.force, options.update);
@@ -206,7 +273,7 @@ async function processTheme(options: CommandOptions, prefixLength: number, slug:
                     if (typeof themeInfo.screenshot_url === 'string') {
                         // screenshot_url
                         const screenshotsDir = path.join(themeLiveDir, 'screenshots');
-                        reporter(`> mkdir -p ${screenshotsDir}`);
+                        vreporter(`> mkdir -p ${screenshotsDir}`);
                         await Deno.mkdir(screenshotsDir, { recursive: true });
                         // some ts.w.org URL's don't have a scheme?
                         const screenshotUrl = new URL(themeInfo.screenshot_url.startsWith('//') ? `https:${themeInfo.screenshot_url}` : themeInfo.screenshot_url);
@@ -236,7 +303,8 @@ async function processTheme(options: CommandOptions, prefixLength: number, slug:
     return {
         status: ok ? (options.full ? 'full' : 'partial') : 'failed',
         when: Date.now(),
-        files
+        files,
+        last_updated_time
     };
 }
 
@@ -318,19 +386,21 @@ async function handleThemeInfo(
     themeLiveDir: string,
     themeMetaDir: string,
     themeReadOnlyDir: string,
-    infoUrl: URL
+    infoUrl: URL,
+    force: boolean,
+    fromAPI: ThemeInfo
 ): Promise<ThemeDownloadResult> {
     const themeJson = path.join(themeMetaDir, 'theme.json');
     const legacyThemeJson = path.join(themeMetaDir, 'legacy-theme.json');
     try {
-        if (options.force) {
+        if (force) {
             await Deno.remove(themeJson, { recursive: true });
             await Deno.remove(legacyThemeJson, { recursive: true });
         }
         const contents = await Deno.readTextFile(legacyThemeJson);
         return JSON.parse(contents);
     } catch (_) {
-        reporter(`fetch(${infoUrl}) > ${themeJson}`);
+        reporter(`fetch(${infoUrl}) > ${legacyThemeJson}`);
         const response = await fetch(infoUrl);
         if (!response.ok) {
             const error = `${response.status} ${response.statusText}`;
@@ -339,7 +409,7 @@ async function handleThemeInfo(
         }
         const json = await response.json();
         const rawText = JSON.stringify(json, null, options.jsonSpaces);
-        const migrated = migrateThemeInfo(options.downloadsBaseUrl, options.supportBaseUrl, themeLiveDir, themeReadOnlyDir, json);
+        const migrated = migrateThemeInfo(options.downloadsBaseUrl, options.supportBaseUrl, themeLiveDir, themeReadOnlyDir, json, fromAPI);
         const text = JSON.stringify(migrated, null, options.jsonSpaces);
         await Deno.writeTextFile(themeJson, text);
         await Deno.writeTextFile(legacyThemeJson, rawText);
@@ -353,8 +423,8 @@ async function handleThemeInfo(
  * @param prefixLength number of characters in prefix of split filename.
  * @param themeSlugs list of plugin slugs.
  */
-async function downloadFiles(options: CommandOptions, prefixLength: number, themeSlugs: Array<string>): Promise<void> {
-    const statusFilename = path.join(options.themesDir, options.statusFilename);
+async function downloadFiles(options: CommandOptions, prefixLength: number, themeSlugs: Array<string>, themeList: Array<ThemeInfo>): Promise<void> {
+    const statusFilename = path.join(options.documentRoot, 'themes', 'meta', options.statusFilename);
     const status = await readDownloadStatus(statusFilename, themeSlugs);
     let ok: boolean = true;
     let soFar: number = 0;
@@ -362,20 +432,40 @@ async function downloadFiles(options: CommandOptions, prefixLength: number, them
     let failure: number = 0;
     let skipped: number = 0;
     let needed: boolean = false;
+    let outdated: boolean = false;
     let changed: boolean = false;
     let pace: number = parseInt(options.pace);
     if (isNaN(pace)) {
         pace = DEFAULT_PACE;
         console.error(`Warning: unable to parse ${options.pace} as an integer. default ${pace} is used`);
     }
-    for (const slug of themeSlugs) {
+    // go through and mark themes for which we are no longer interested.
+    for (const slug in status.map) {
+        if (!themeSlugs.includes(slug)) {
+            status.map[slug].status = 'uninteresting';
+        }
+    }
+    for (const item of themeList) {
+        if (typeof item.slug !== 'string') {
+            continue;
+        }
+        const slug = item.slug;
         needed = false;
+        outdated = false;
         if (typeof status.map[slug] !== 'object') {
             status.map[slug] = { status: 'unknown', when: 0, files: {} };
         }
         if ((typeof status.map[slug] === 'object') &&
             (typeof status.map[slug]?.status === 'string') &&
             (typeof status.map[slug]?.when === 'number')) {
+
+            // check to see if the data we have is out of date.
+            if ((typeof status.map[slug]?.last_updated_time === 'string') &&
+                (typeof item?.last_updated_time === 'string') &&
+                (status.map[slug].last_updated_time < item.last_updated_time)) {
+                status.map[slug].status = 'outdated';
+            }
+            // determine if we need this theme
             switch (status.map[slug]?.status) {
                 case 'unknown':
                     needed = true;
@@ -384,18 +474,23 @@ async function downloadFiles(options: CommandOptions, prefixLength: number, them
                     needed = options.full;
                     break;
                 case 'full':
+                case 'uninteresting':
                     needed = false;
                     break;
                 case 'failed':
                     needed = options.retry;
+                    break;
+                case 'outdated':
+                    needed = true;
+                    outdated = true;
                     break;
                 default:
                     console.error(`Error: unrecognized status. slug=${slug}, status=${status.map[slug]?.status}`);
                     break;
             }
             soFar += 1;
-            if (needed || options.force) {
-                const themeStatus = await processTheme(options, prefixLength, slug);
+            if (needed || options.force || outdated) {
+                const themeStatus = await processTheme(options, prefixLength, slug, outdated, item);
                 changed = true;
                 if ((themeStatus.status === 'full') || (themeStatus.status === 'partial')) {
                     success += 1;
@@ -407,6 +502,7 @@ async function downloadFiles(options: CommandOptions, prefixLength: number, them
                 const existing = status.map[slug].files;
                 status.map[slug].status = themeStatus.status;
                 status.map[slug].when = themeStatus.when;
+                status.map[slug].last_updated_time = themeStatus.last_updated_time;
                 status.map[slug].files = {};
                 for (const name in themeStatus.files) {
                     status.map[slug].files[name] = mergeDownloadInfo(existing[name], themeStatus.files[name]);
@@ -429,11 +525,11 @@ async function downloadFiles(options: CommandOptions, prefixLength: number, them
                 ok = await saveDownloadStatus(statusFilename, status) && ok;
             }
             changed = false;
-            reporter('');
+            vreporter('');
             reporter(`themes processed:   ${soFar}`);
-            reporter(`successful:         ${success}`);
-            reporter(`failures:           ${failure}`);
-            reporter(`skipped:            ${skipped}`);
+            vreporter(`successful:         ${success}`);
+            vreporter(`failures:           ${failure}`);
+            vreporter(`skipped:            ${skipped}`);
         }
     }
     status.when = Date.now();
@@ -447,6 +543,226 @@ async function downloadFiles(options: CommandOptions, prefixLength: number, them
 }
 
 /**
+ * Determine the URL to use to query a themes list.
+ * @param apiHost where the API is.
+ * @param pageNumber which page of data requested.
+ * @param [browse=undefined] browse parameter to query_themes request (if any).
+ * @returns
+ */
+function getThemeListUrl(apiHost: string, pageNumber: number = 1, browse: undefined | ThemeBrowseOptions = undefined): URL {
+    const url = new URL('/themes/info/1.2/', `https://${apiHost}`);
+    url.searchParams.append('action', 'query_themes');
+    url.searchParams.append('fields[]','description');
+    url.searchParams.append('fields[]','ratings');
+    url.searchParams.append('fields[]','active_installs');
+    url.searchParams.append('fields[]','sections');
+    url.searchParams.append('fields[]','parent');
+    url.searchParams.append('fields[]','template');
+    url.searchParams.append('per_page', '100');
+    url.searchParams.append('page', `${pageNumber}`);
+    if (browse) {
+        url.searchParams.append('browse', browse);
+    }
+    return url;
+}
+
+/**
+ * Query the API server for a list of theme information.
+ * @param apiHost hostname to query for theme information.
+ * @param browse what kind of information to request.
+ * @returns list of theme information.
+ */
+async function getAPIThemeList(apiHost: string, browse: undefined | ThemeBrowseOptions): Promise<Array<ThemeInfo>> {
+    const collection: Array<ThemeInfo> = [];
+    let pages: number = 1;
+    let page: number = 1;
+    while (page <= pages) {
+        const url = getThemeListUrl(apiHost, page, browse);
+        vreporter(`fetch(${url})`);
+        const response = await fetch(url);
+        if (response.ok) {
+            const json = await response.json();
+            if ((typeof json.info === 'object') && (typeof json.info.pages === 'number')) {
+                pages = json.info.pages;
+            }
+            if (Array.isArray(json.themes)) {
+                collection.push(...json.themes);
+            }
+        }
+        page += 1;
+    }
+    return collection;
+}
+
+/**
+ * Read a JSON w/comments file that contains an array of theme slugs.
+ * @param options command-line options.
+ * @returns list of theme information.
+ */
+async function getInterestingList(options: CommandOptions): Promise<Array<ThemeInfo>> {
+    const list: Array<ThemeInfo> = [];
+    const contents = await Deno.readTextFile(options.interestingFilename);
+    const jsonc = parse(contents) as unknown;
+    if (!Array.isArray(jsonc)) {
+        console.error(`Error: JSON w/comments in ${options.interestingFilename} is not an Array.`);
+        reporter(`Note: file should be in JSON format, not just a list of slugs.`);
+    } else {
+        for (let n=0; n < jsonc.length; n++) {
+            if (typeof jsonc[n] === 'string') {
+                list.push({ slug: jsonc[n] });
+            }
+        }
+    }
+    return list;
+}
+
+/**
+ * Query the API server to get a list of theme information.
+ * @param apiHost where to get the list of themes.
+ * @param browse what kind of request.
+ * @returns list of theme's information.
+ */
+async function getUnlimitedThemeList(options: CommandOptions, kind: ThemeListOptions): Promise<Array<ThemeInfo>> {
+    if (kind === 'subversion') {
+        const slugs = await getThemeSlugs(`http://${options.repoHost}/`, options.DEBUG_USE_FIXED_THEME_SLUGS);
+        const list: Array<ThemeInfo> = [];
+        slugs.forEach((slug) => list.push({slug}));
+        return list;
+    }
+    if (kind === 'interesting') {
+        return await getInterestingList(options);
+    }
+    if (kind === 'defaults') {
+        return await getAPIThemeList(options.apiHost, undefined);
+    }
+    return await getAPIThemeList(options.apiHost, kind);
+}
+
+/**
+ * Query the API server to get list of theme information. Impose
+ * any optional limit on the number of entires.
+ * @param options where to get the list of themes.
+ * @param kind what kind of request.
+ * @returns list of theme's information possiblily limited.
+ */
+async function getThemeList(options: CommandOptions, kind: ThemeListOptions): Promise<Array<ThemeInfo>> {
+    const list = await getUnlimitedThemeList(options, kind);
+    if (options.limit) {
+        const limit = parseInt(options.limit);
+        if (isNaN(limit)) {
+            console.error(`Warning: unable to parse limit=${options.limit}, it is ignored.`);
+        } else if (list.length > limit) {
+            return list.slice(0, limit);
+        }
+    }
+    return list;
+}
+
+/**
+ * Extract a list of themes from an HTML page.
+ * @param listUrl where to access the theme list
+ * @returns list of theme slugs.
+ */
+async function getThemeLists(options: CommandOptions): Promise<ThemeLists> {
+    const subversion = await getThemeList(options, 'subversion');
+    const defaults = await getThemeList(options, 'defaults');
+    const featured = await getThemeList(options, 'featured');
+    const introduced = await getThemeList(options, 'new');
+    const popular = await getThemeList(options, 'popular');
+    const updated = await getThemeList(options, 'updated');
+    let interesting: Array<ThemeInfo> = [];
+    if (options.list === 'interesting') {
+        interesting = await getThemeList(options, 'interesting');
+    }
+
+    return {
+        'defaults': defaults,
+        'featured': featured,
+        'interesting': interesting,
+        'new': introduced,
+        'popular': popular,
+        'subversion': subversion,
+        'updated': updated
+    };
+}
+
+/**
+ *
+ * @param list1 list of theme information.
+ * @param list2 another list of theme information.
+ * @returns number of slugs in list1 that are also in list2.
+ */
+// function intersectionCount(list1: Array<ThemeInfo>, list2: Array<ThemeInfo>): number {
+//     const map: Record<string, boolean> = {};
+//     list2.forEach((info: ThemeInfo) => {
+//         if (typeof info?.slug === 'string') {
+//             map[info.slug] = true;
+//         }
+//     });
+//     let count: number = 0;
+//     list1.forEach((info: ThemeInfo) => {
+//         if ((typeof info?.slug === 'string') && map[info.slug]) {
+//             count += 1;
+//         }
+
+//     });
+//     return count;
+// }
+
+function themeListsReport(lists: ThemeLists) {
+    const keys: Array<string> = [];
+    reporter(`list name(count)`);
+    for (const name in lists) {
+        if (Array.isArray(lists[name])) {
+            reporter(`    ${name}(${lists[name].length})`);
+            keys.push(name);
+        }
+    }
+    // const intersections: Record<string, Record<string, number | string>> = {};
+
+    // for (const outer of keys) {
+    //     intersections[outer] = {};
+    //     for (const inner of keys) {
+    //         if (outer === inner) {
+    //             intersections[outer][inner] = `=${lists[inner].length}`;
+    //         } else {
+    //             intersections[outer][inner] = intersectionCount(lists[inner], lists[outer]);
+    //         }
+    //     }
+    // }
+    // const json = JSON.stringify(intersections, null, '    ');
+
+    // const updatedSlugs: Array<string> = [];
+    // const newSlugs: Array<string> = [];
+    // if (Array.isArray(lists['new']) && Array.isArray(lists['updated'])) {
+    //     lists['new'].forEach((info) => newSlugs.push(`${info.slug}`));
+    //     lists['updated'].forEach((info) => updatedSlugs.push(`${info.slug}`));
+    //     let matching = true;
+    //     for (let n: number = 0; n < newSlugs.length; n++) {
+    //         if (newSlugs[n] !== updatedSlugs[n]) {
+    //             reporter(`new and updated failed to match @${n}`);
+    //             matching = false;
+    //             break;
+    //         }
+    //     }
+    //     if (matching) {
+    //         reporter(`new and updated lists match`);
+    //     }
+    // }
+
+    // reporter(json);
+}
+
+async function saveThemeLists(options: CommandOptions, lists: ThemeLists): Promise<void> {
+    const text = JSON.stringify(lists, null, options.jsonSpaces);
+    const dirname = path.join(options.documentRoot, 'themes', 'meta');
+    await Deno.mkdir(dirname, { recursive: true });
+    const filename = path.join(dirname, options.listsFilename);
+    vreporter(`save theme lists> ${filename}`);
+    await Deno.writeTextFile(filename, text);
+}
+
+/**
  * Provide help to the user.
  */
 function printHelp(): void {
@@ -455,6 +771,8 @@ function printHelp(): void {
     console.log(`Options include [default value]:`);
     console.log(`--apiHost=host             [${parseOptions.default?.apiHost}]`);
     console.log(`    define where to load theme data.`);
+    console.log(`--documentRoot=dir         [${parseOptions.default?.documentRoot}]`);
+    console.log(`    define where save files.`);
     console.log(`--downloadsBaseUrl=url     [${parseOptions.default?.downloadsBaseUrl}]`);
     console.log(`    define downstream downloads host.`);
     console.log(`--downloadsHost=host       [${parseOptions.default?.downloadsHost}]`);
@@ -465,8 +783,18 @@ function printHelp(): void {
     console.log(`    full archive. include all versions, screenshots, and previews`);
     console.log(`--help`);
     console.log(`    print this message and exit.`);
+    console.log(`--interestingFilename=name [${parseOptions.default?.interestingFilename}]`);
+    console.log(`    JSON w/comments file of interesting theme slugs.`);
     console.log(`--jsonSpaces=spaces        [${parseOptions.default?.jsonSpaces}]`);
     console.log(`    spaces used to delimit generated JSON files.`);
+    console.log(`--limit=number             [none]`);
+    console.log(`    maximum number of themes in a list.`);
+    console.log(`--list=kind                [${parseOptions.default?.list}]`);
+    console.log(`    which list to use: subversion, defaults, featured, interesting, new, popular, updated.`);
+    console.log(`--lists                    [${parseOptions.default?.lists}]`);
+    console.log(`    load all theme lists and save to listsFilename.`);
+    console.log(`--listsFilename=name       [${parseOptions.default?.listsFilename}]`);
+    console.log(`    JSON file of lists of legacy theme information.`);
     console.log(`--pace=number              [${parseOptions.default?.pace}]`);
     console.log(`    number of items processed between status file saves.`);
     console.log(`--prefixLength=number      [${parseOptions.default?.prefixLength}]`);
@@ -481,10 +809,10 @@ function printHelp(): void {
     console.log(`    define where to save status information.`);
     console.log(`--supportBaseUrl=url       [${parseOptions.default?.supportBaseUrl}]`);
     console.log(`    define downstream support host.`);
-    console.log(`--themesDir=dir            [${parseOptions.default?.themesDir}]`);
-    console.log(`    define where save files (must end with "themes").`);
     console.log(`--update                   [${parseOptions.default?.update}]`);
     console.log(`    recalculate message digests (hashes).`);
+    console.log(`--verbose                  [${parseOptions.default?.verbose}]`);
+    console.log(`    be verbose. include more informational messages.`);
     console.log(`--version`);
     console.log(`    print program version and exit.`);
 }
@@ -508,15 +836,18 @@ async function main(argv: Array<string>): Promise<number> {
     if (options.quiet) {
         reporter = QUIET_CONSOLE_REPORTER;
     }
-    reporter(`${PROGRAM_NAME} v${VERSION}`);
-    const writeAccess = await Deno.permissions.request({ name: 'write', path: options.themesDir});
+    if (options.verbose) {
+        vreporter = VERBOSE_CONSOLE_REPORTER;
+    }
+    vreporter(`${PROGRAM_NAME} v${VERSION}`);
+    const writeAccess = await Deno.permissions.request({ name: 'write', path: options.documentRoot});
     if (writeAccess.state !== 'granted') {
-        console.error(`Error: write access is required to themesDir ${options.themesDir}`);
+        console.error(`Error: write access is required to documentRoot ${options.documentRoot}`);
         return 1;
     }
-    const buildAccess = await Deno.permissions.request({ name: 'read', path: options.themesDir});
+    const buildAccess = await Deno.permissions.request({ name: 'read', path: options.documentRoot});
     if (buildAccess.state !== 'granted') {
-        console.error(`Error: read access is required to themesDir ${options.themesDir}`);
+        console.error(`Error: read access is required to documentRoot ${options.documentRoot}`);
         return 1;
     }
     const apiAccess = await Deno.permissions.request({ name: 'net', host: options.apiHost});
@@ -534,12 +865,17 @@ async function main(argv: Array<string>): Promise<number> {
         console.error(`Error: network access is required to repoHost ${options.downloadsHost}`);
         return 1;
     }
-    const themeSlugs = await getThemeSlugs(`https://${options.repoHost}/`, options.DEBUG_USE_FIXED_THEME_SLUGS);
-    if (themeSlugs.length === 0) {
-        console.error(`Error: no themes found`);
-        return 1;
+    if (options.lists) {
+        const themeLists = await getThemeLists(options);
+        themeListsReport(themeLists);
+        await saveThemeLists(options, themeLists);
+        return 0;
     }
-    reporter(`themes found:      ${themeSlugs.length}`);
+    const themeList = await getThemeList(options, options.list);
+    const themeSlugs: Array<string> = [];
+    themeList.forEach((item) => { if (item.slug) { themeSlugs.push(item.slug) } });
+    reporter(`themes found:      ${themeList.length}`);
+
     const prefixLength = parseInt(options.prefixLength);
     if (isNaN(prefixLength)) {
         console.error(`Error: prefixLength=${options.prefixLength} is not a valid integer`);
@@ -553,7 +889,7 @@ async function main(argv: Array<string>): Promise<number> {
         return 0;
     }
 
-    await downloadFiles(options, prefixLength, themeSlugs);
+    await downloadFiles(options, prefixLength, themeSlugs, themeList);
 
     return 0;
 }

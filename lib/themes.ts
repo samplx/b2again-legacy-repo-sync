@@ -100,7 +100,8 @@ export function migrateThemeInfo(downloadsBaseUrl: string,
                                  supportBaseUrl: string,
                                  themeLiveDir: string,
                                  themeReadOnlyDir: string,
-                                 input: ThemeInfo): ThemeInfo {
+                                 input: ThemeInfo,
+                                 fromAPI: ThemeInfo): ThemeInfo {
 
     const kleen = { ...input };
     if ((typeof kleen.author === 'string') && (kleen.author.indexOf('@') < 0)) {
@@ -130,14 +131,30 @@ export function migrateThemeInfo(downloadsBaseUrl: string,
         }
     }
     if (typeof kleen.description === 'string') {
-        if (kleen.sections) {
+        if (!kleen.sections) {
+            kleen.sections = { description: kleen.description };
+            kleen.description = undefined;
+        } else if (kleen.sections?.description === kleen.description) {
+            kleen.description = undefined;
+        } else if (typeof kleen.sections?.description !== 'string') {
             // deepen copy before mutation
-            kleen.sections = { ... kleen.sections };
+            kleen.sections = { ...kleen.sections };
             kleen.sections.description = kleen.description;
-        } else {
-            kleen.sections = { description : kleen.description };
         }
-        kleen.description = undefined;
+    } else if (typeof fromAPI.description === 'string') {
+        if (!kleen.sections) {
+            kleen.sections = { description: fromAPI.description };
+        } else if (typeof kleen.sections?.description !== 'string') {
+            // deepen copy before mutation
+            kleen.sections = { ...kleen.sections };
+            kleen.sections.description = fromAPI.description;
+        }
+    }
+    if (!kleen.parent && fromAPI.parent) {
+        kleen.parent = { ...fromAPI.parent };
+    }
+    if (!kleen.template && fromAPI.template) {
+        kleen.template = fromAPI.template;
     }
     kleen.rating = 0;
     kleen.ratings = { '1': 0, '2': 0, '3': 0, '4': 0, '5': 0 };

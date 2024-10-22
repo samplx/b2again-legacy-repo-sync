@@ -4,6 +4,8 @@
     "jsr:@std/cli@*": "1.0.6",
     "jsr:@std/cli@^1.0.6": "1.0.6",
     "jsr:@std/crypto@*": "1.0.3",
+    "jsr:@std/jsonc@*": "1.0.1",
+    "jsr:@std/jsonc@^1.0.1": "1.0.1",
     "jsr:@std/path@*": "1.0.6",
     "jsr:@std/path@^1.0.6": "1.0.6",
     "jsr:@std/regexp@*": "1.0.0",
@@ -16,6 +18,9 @@
     "@std/crypto@1.0.3": {
       "integrity": "a2a32f51ddef632d299e3879cd027c630dcd4d1d9a5285d6e6788072f4e51e7f"
     },
+    "@std/jsonc@1.0.1": {
+      "integrity": "6b36956e2a7cbb08ca5ad7fbec72e661e6217c202f348496ea88747636710dda"
+    },
     "@std/path@1.0.6": {
       "integrity": "ab2c55f902b380cf28e0eec501b4906e4c1960d13f00e11cfbcd21de15f18fed"
     },
@@ -26,6 +31,7 @@
   "workspace": {
     "dependencies": [
       "jsr:@std/cli@^1.0.6",
+      "jsr:@std/jsonc@^1.0.1",
       "jsr:@std/path@^1.0.6",
       "jsr:@std/regexp@1"
     ]

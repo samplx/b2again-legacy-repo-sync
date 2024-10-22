@@ -21,7 +21,7 @@ import { ConsoleReporter } from "./reporter.ts";
 /**
  * Classification of a download group or file.
  */
-export type DownloadStatus = 'unknown' | 'partial' | 'full' | 'failed';
+export type DownloadStatus = 'unknown' | 'partial' | 'full' | 'failed' | 'outdated' | 'uninteresting';
 
 /**
  * Describes an asset downloaded.
@@ -37,6 +37,8 @@ export interface DownloadFileInfo {
     sha256?: string;
     /** optional md5 message digest of the file contents as a hex string. */
     md5?: string;
+    /** optional SHA-1 message digest of the file contents as a hex string. */
+    sha1?: string;
 }
 
 /**
@@ -47,6 +49,8 @@ export interface GroupDownloadInfo {
     status: DownloadStatus;
     /** timestamp of when the status was defined. 0 if unknown/undefined. */
     when: number;
+    /** timestamp from when group item (plugin/theme) was updated. */
+    last_updated_time?: string;
     /**
      * hash map of key=filename, value = file information
      */
@@ -105,6 +109,18 @@ export async function getHrefListFromPage(reporter: ConsoleReporter, url: string
 }
 
 /**
+ * Calculate the sha-1 message digest of a buffer.
+ * @param contents buffer to examine.
+ * @returns SHA-1 of the contents as a hex string.
+ */
+async function sha1sum(contents: ArrayBuffer): Promise<string> {
+    const sha256buffer = await crypto.subtle.digest('SHA-1', contents);
+    const sha256array = Array.from(new Uint8Array(sha256buffer));
+    const sha256 = sha256array.map((b) => b.toString(16).padStart(2, '0')).join('');
+    return sha256;
+}
+
+/**
  * Calculate the sha-256 message digest of a buffer.
  * @param contents buffer to examine.
  * @returns SHA-256 of the contents as a hex string.
@@ -149,6 +165,7 @@ export async function downloadFile(reporter: ConsoleReporter, sourceUrl: URL, ta
     }
     let sha256;
     let md5;
+    let sha1;
     if (needed) {
         reporter(`fetch(${sourceUrl}) > ${targetFile}`);
         const response = await fetch(sourceUrl);
@@ -163,6 +180,7 @@ export async function downloadFile(reporter: ConsoleReporter, sourceUrl: URL, ta
         try {
             sha256 = await sha256sum(contents);
             md5 = await md5sum(contents);
+            sha1 = await sha1sum(contents);
             Deno.writeFile(targetFile, contents, { mode: 0o644 })
         } catch (_) {
             console.error(`Error: unable to save file: ${targetFile}`);
@@ -177,6 +195,7 @@ export async function downloadFile(reporter: ConsoleReporter, sourceUrl: URL, ta
             const contents = await Deno.readFile(targetFile);
             sha256 = await sha256sum(contents.buffer);
             md5 = await md5sum(contents.buffer);
+            sha1 = await sha1sum(contents.buffer);
         } catch (_) {
             console.error(`Error: unable to read file to compute hashes: ${targetFile}`);
             return {
@@ -191,7 +210,8 @@ export async function downloadFile(reporter: ConsoleReporter, sourceUrl: URL, ta
         status: 'full',
         when: Date.now(),
         sha256,
-        md5
+        md5,
+        sha1
     };
 }
 
@@ -257,16 +277,18 @@ export async function saveDownloadStatus(statusFilename: string, info: GroupDown
  * @returns merged results.
  */
 export function mergeDownloadInfo(existing: undefined | DownloadFileInfo, recent: DownloadFileInfo): DownloadFileInfo {
-    const { sha256: exSha256, md5: exMd5 } = existing ?? { };
-    const { filename, when, status: nStatus, md5: nMd5, sha256: nSha256 } = recent;
+    const { sha256: exSha256, md5: exMd5, sha1: exSha1 } = existing ?? { };
+    const { filename, when, status: nStatus, md5: nMd5, sha256: nSha256, sha1: nSha1 } = recent;
     const sha256 = nSha256 ?? exSha256;
     const md5 = nMd5 ?? exMd5;
+    const sha1 = nSha1 ?? exSha1;
     return {
         filename,
         when,
         status: nStatus,
         md5,
-        sha256
+        sha256,
+        sha1
     };
 }
 
