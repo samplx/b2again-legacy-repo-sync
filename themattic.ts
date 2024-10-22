@@ -126,6 +126,9 @@ interface CommandOptions {
     /** if true, only report errors. */
     quiet: boolean;
 
+    /** flag indicating the message digest (hashes) should be recalculated. */
+    rehash: boolean;
+
     /** where to get sources */
     repoHost: string;
 
@@ -137,9 +140,6 @@ interface CommandOptions {
 
     /** URL address of the support server. */
     supportBaseUrl: string;
-
-    /** flag indicating an update operation. */
-    update: boolean;
 
     /** flag indicating more verbose output is desired. */
     verbose: boolean;
@@ -176,11 +176,11 @@ const parseOptions: ParseOptions = {
         pace: `${DEFAULT_PACE}`,
         prefixLength: '2',
         quiet: false,
+        rehash: false,
         repoHost: 'themes.svn.wordpress.org',
         retry: false,
         statusFilename: 'themes-status.json',
         supportBaseUrl: 'https://support.b2again.org/',
-        update: false,
         verbose: false,
         version: false,
         DEBUG_USE_FIXED_THEME_SLUGS: false,
@@ -191,8 +191,8 @@ const parseOptions: ParseOptions = {
         'help',
         'lists',
         'quiet',
+        'rehash',
         'retry',
-        'update',
         'version',
         'verbose',
         'DEBUG_USE_FIXED_THEME_SLUGS'
@@ -256,7 +256,7 @@ async function processTheme(
             } else {
                 last_updated_time = themeInfo.last_updated_time;
                 const zipFilename = path.join(themeReadOnlyDir, themeInfo.download_link.substring(themeInfo.download_link.lastIndexOf('/')+1));
-                const fileInfo = await downloadFile(reporter, new URL(themeInfo.download_link), zipFilename, options.force, options.update);
+                const fileInfo = await downloadFile(reporter, new URL(themeInfo.download_link), zipFilename, options.force, options.rehash);
                 ok = ok && (fileInfo.status === 'full');
                 files[fileInfo.filename] = fileInfo;
                 if (options.full) {
@@ -266,7 +266,7 @@ async function processTheme(
                         vreporter(`> mkdir -p ${previewDir}`);
                         await Deno.mkdir(previewDir, { recursive: true });
                         const previewIndex = path.join(previewDir, 'index.html');
-                        const previewInfo = await downloadFile(reporter, new URL(themeInfo.preview_url), previewIndex, options.force, options.update);
+                        const previewInfo = await downloadFile(reporter, new URL(themeInfo.preview_url), previewIndex, options.force, options.rehash);
                         ok = ok && (previewInfo.status === 'full');
                         files[previewInfo.filename] = previewInfo;
                     }
@@ -279,7 +279,7 @@ async function processTheme(
                         const screenshotUrl = new URL(themeInfo.screenshot_url.startsWith('//') ? `https:${themeInfo.screenshot_url}` : themeInfo.screenshot_url);
                         const screenshotFile = path.join(screenshotsDir,
                             screenshotUrl.pathname.substring(screenshotUrl.pathname.lastIndexOf('/')+1));
-                        const screenshotInfo = await downloadFile(reporter, screenshotUrl, screenshotFile, options.force, options.update);
+                        const screenshotInfo = await downloadFile(reporter, screenshotUrl, screenshotFile, options.force, options.rehash);
                         ok = ok && (screenshotInfo.status === 'full');
                         files[screenshotInfo.filename] = screenshotInfo;
                     }
@@ -363,7 +363,7 @@ async function downloadThemeZip(options: CommandOptions, sourceUrl: string, them
     } catch (_) {
         // ignored, wait for download to fail.
     }
-    const info = await downloadFile(reporter, new URL(sourceUrl), zipFilename, options.force, options.update);
+    const info = await downloadFile(reporter, new URL(sourceUrl), zipFilename, options.force, options.rehash);
     try {
         await Deno.chmod(zipFilename, 0o444);
     } catch (_) {
@@ -489,7 +489,7 @@ async function downloadFiles(options: CommandOptions, prefixLength: number, them
                     break;
             }
             soFar += 1;
-            if (needed || options.force || outdated) {
+            if (needed || options.force || options.rehash || outdated) {
                 const themeStatus = await processTheme(options, prefixLength, slug, outdated, item);
                 changed = true;
                 if ((themeStatus.status === 'full') || (themeStatus.status === 'partial')) {
@@ -801,6 +801,8 @@ function printHelp(): void {
     console.log(`    number of characters in directory prefix.`);
     console.log(`--quiet                    [${parseOptions.default?.quiet}]`);
     console.log(`    be quiet. supress non-error messages.`);
+    console.log(`--rehash                   [${parseOptions.default?.rehash}]`);
+    console.log(`    recalculate message digests (hashes).`);
     console.log(`--repoHost=host            [${parseOptions.default?.repoHost}]`);
     console.log(`    define where to load list of themes from subversion.`);
     console.log(`--retry                    [${parseOptions.default?.retry}]`);
@@ -809,8 +811,6 @@ function printHelp(): void {
     console.log(`    define where to save status information.`);
     console.log(`--supportBaseUrl=url       [${parseOptions.default?.supportBaseUrl}]`);
     console.log(`    define downstream support host.`);
-    console.log(`--update                   [${parseOptions.default?.update}]`);
-    console.log(`    recalculate message digests (hashes).`);
     console.log(`--verbose                  [${parseOptions.default?.verbose}]`);
     console.log(`    be verbose. include more informational messages.`);
     console.log(`--version`);
