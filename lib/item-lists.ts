@@ -72,8 +72,8 @@ async function getAPIItemList(reporter: ConsoleReporter, apiHost: string, itemTy
             if ((typeof json.info === 'object') && (typeof json.info.pages === 'number')) {
                 pages = json.info.pages;
             }
-            if (Array.isArray(json.themes)) {
-                collection.push(...json.themes);
+            if (Array.isArray(json[`${itemType}s`])) {
+                collection.push(...json[`${itemType}s`]);
             }
         }
         page += 1;
