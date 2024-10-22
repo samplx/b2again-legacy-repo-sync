@@ -26,7 +26,7 @@ import {
     mergeDownloadInfo,
     downloadZip
 } from "./lib/downloads.ts";
-import { CommandOptions, DEFAULT_PACE, printHelp } from "./lib/options.ts";
+import { CommandOptions, DEFAULT_PACE, isValidListType, printHelp } from "./lib/options.ts";
 import { printSplitSummary, splitFilename } from "./lib/split-filename.ts";
 import { parseArgs, ParseOptions } from "jsr:@std/cli/parse-args";
 import * as path from "jsr:@std/path";
@@ -74,9 +74,10 @@ async function processTheme(
         outdated: boolean,
         fromAPI: ThemeInfo
     ): Promise<GroupDownloadInfo> {
-    const themeReadOnlyDir = path.join(options.documentRoot, 'themes', 'read-only', 'legacy', splitFilename(slug, prefixLength));
-    const themeMetaDir = path.join(options.documentRoot, 'themes', 'meta', 'legacy', splitFilename(slug, prefixLength));
-    const themeLiveDir = path.join(options.documentRoot, 'themes', 'live', 'legacy', splitFilename(slug, prefixLength));
+    const split = splitFilename(slug, prefixLength);
+    const themeReadOnlyDir = path.join(options.documentRoot, 'themes', 'read-only', 'legacy', split);
+    const themeMetaDir = path.join(options.documentRoot, 'themes', 'meta', 'legacy', split);
+    const themeLiveDir = path.join(options.documentRoot, 'themes', 'live', 'legacy', split);
 
     const files: Record<string, DownloadFileInfo> = {};
     const infoUrl = getThemeInfoUrl(options.apiHost, slug);
@@ -88,7 +89,7 @@ async function processTheme(
         vreporter(`> mkdir -p ${themeMetaDir}`);
         await Deno.mkdir(themeMetaDir, { recursive: true });
 
-        const themeInfo = await handleThemeInfo(options, themeLiveDir, themeMetaDir, themeReadOnlyDir, infoUrl, outdated || options.force, fromAPI);
+        const themeInfo = await handleThemeInfo(options, themeMetaDir, infoUrl, split, outdated || options.force, fromAPI);
         if (themeInfo) {
             if ((typeof themeInfo.slug !== 'string') ||
                 (typeof themeInfo.error === 'string') ||
@@ -179,10 +180,9 @@ function getThemeInfoUrl(apiHost: string, name: string): URL {
  */
 async function handleThemeInfo(
     options: CommandOptions,
-    themeLiveDir: string,
     themeMetaDir: string,
-    themeReadOnlyDir: string,
     infoUrl: URL,
+    split: string,
     force: boolean,
     fromAPI: ThemeInfo
 ): Promise<ThemeDownloadResult> {
@@ -205,7 +205,7 @@ async function handleThemeInfo(
         }
         const json = await response.json();
         const rawText = JSON.stringify(json, null, options.jsonSpaces);
-        const migrated = migrateThemeInfo(options.downloadsBaseUrl, options.supportBaseUrl, themeLiveDir, themeReadOnlyDir, json, fromAPI);
+        const migrated = migrateThemeInfo(options.downloadsBaseUrl, options.supportBaseUrl, split, json, fromAPI);
         const text = JSON.stringify(migrated, null, options.jsonSpaces);
         await Deno.writeTextFile(themeJson, text);
         await Deno.writeTextFile(legacyThemeJson, rawText);
@@ -396,6 +396,10 @@ async function main(argv: Array<string>): Promise<number> {
         return 0;
     }
 
+    if (!isValidListType(options.list)) {
+        console.error(`Error: unrecognized list type: ${options.list}`);
+        return 1;
+    }
     const themeList = await getItemList(reporter, options, 'theme', options.list);
     const themeSlugs: Array<string> = [];
     themeList.forEach((item) => { if (item.slug) { themeSlugs.push(item.slug) } });

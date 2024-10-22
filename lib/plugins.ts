@@ -126,10 +126,13 @@ function isWordpressOrg(url: string): boolean {
  * @param input source plugin information.
  * @returns plugin information with selected fields redacted/zero'd.
  */
-export function migratePluginInfo(downloadsBaseUrl: string,
+export function migratePluginInfo(
+    downloadsBaseUrl: string,
     supportBaseUrl: string,
     split: string,
-    input: PluginInfo): PluginInfo {
+    input: PluginInfo,
+    _fromAPI: PluginInfo
+): PluginInfo {
     const kleen = { ... input};
     const screenshotMap: Record<string, string> = {};
 
@@ -159,8 +162,8 @@ export function migratePluginInfo(downloadsBaseUrl: string,
         // kleen is a shallow copy, deepen it before we mutate it
         kleen.screenshots = { ...kleen.screenshots };
         for (const key in kleen.screenshots) {
-            if (kleen.screenshots[key].src) {
-                const updated = getScreenshotUrl(downloadsBaseUrl, split, kleen.screenshots[key].src ?? '--should-not-happen-famous-last-words--');
+            if (typeof kleen.screenshots[key].src == 'string') {
+                const updated = getScreenshotUrl(downloadsBaseUrl, split, kleen.screenshots[key].src);
                 screenshotMap[kleen.screenshots[key].src] = updated;
                 kleen.screenshots[key].src = updated;
             }

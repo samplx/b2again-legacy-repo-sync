@@ -18,7 +18,7 @@
 import { ParseOptions } from "jsr:@std/cli/parse-args";
 
 /** default number of items processed between saves of the status file. */
-export const DEFAULT_PACE: number = 25;
+export const DEFAULT_PACE: number = 1000;
 
 /** default number of characters in the directory prefix. */
 export const DEFAULT_PREFIX_LENGTH: number = 2;
@@ -227,4 +227,14 @@ export function printHelp(programName: string, parseOptions: ParseOptions): void
     console.log(`    be verbose. include more informational messages.`);
     console.log(`--version`);
     console.log(`    print program version and exit.`);
+}
+
+/**
+ * (I know there must be a better way to do this in TypeScript, still looking...)
+ * @param kind a potential list type value
+ * @returns true if it is valid list type value.
+ */
+// deno-lint-ignore no-explicit-any
+export function isValidListType(kind: any): kind is ItemListOptions {
+    return ['featured', 'new', 'popular', 'updated', 'defaults', 'interesting', 'subversion'].includes(kind);
 }

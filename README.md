@@ -15,7 +15,15 @@ screenshot or banner files, or any preview pages, and **all** versions of **ever
 
 ### Plugins
 
-The preliminary numbers are ~30 GB for partial plugin download. Full download is in progress.
+The preliminary numbers are ~30 GB for partial plugin download. Full download is ~620 GB.
+The first pass complete using the subversion repository list.
+
+```
+$ du -hs plugins/*
+12G	    plugins/live
+1.9G	plugins/meta
+606G	plugins/read-only
+```
 
 ### Themes
 
