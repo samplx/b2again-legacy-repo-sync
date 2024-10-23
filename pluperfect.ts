@@ -308,7 +308,6 @@ async function downloadFiles(
                     console.error(`Warning: unknown status after processPlugin: slug=${slug}`);
                 }
                 changed = true;
-                status.map[slug] = pluginStatus;
                 const existing = status.map[slug].files;
                 status.map[slug].status = pluginStatus.status;
                 status.map[slug].when = pluginStatus.when;
