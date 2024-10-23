@@ -37,7 +37,7 @@ import { getItemList, getItemLists, itemListsReport, saveItemLists } from "./lib
 /** how the script describes itself. */
 const PROGRAM_NAME: string = 'pluperfect';
 /** current semver */
-const VERSION: string = '0.3.0';
+const VERSION: string = '0.3.1';
 
 /** Poor implementation of an Either for the download results. */
 type PluginDownloadResult = DownloadErrorInfo & PluginInfo;
@@ -320,6 +320,7 @@ async function downloadFiles(
                 ok = ok && (pluginStatus.status !== 'failed');
             } else {
                 skipped += 1;
+                vreporter(`skipped slug: ${slug}`);
             }
         } else {
             console.error(`Error: unknown status: slug=${slug}`);

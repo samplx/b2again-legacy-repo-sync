@@ -38,7 +38,7 @@ import { getItemList, getItemLists, itemListsReport, saveItemLists } from "./lib
 /** how the script describes itself. */
 const PROGRAM_NAME: string = 'themattic';
 /** current semver */
-const VERSION: string = '0.3.0';
+const VERSION: string = '0.3.1';
 
 /**
  * How to report non-errors.
@@ -305,6 +305,7 @@ async function downloadFiles(options: CommandOptions, prefixLength: number, them
                 ok = ok && (themeStatus.status !== 'failed');
             } else {
                 skipped += 1;
+                vreporter(`skipped slug: ${slug}`);
             }
         } else {
             console.error(`Error: unknown status: slug=${slug}`);
