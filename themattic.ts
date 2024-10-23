@@ -286,7 +286,6 @@ async function downloadFiles(options: CommandOptions, prefixLength: number, them
             soFar += 1;
             if (needed || options.force || options.rehash || outdated) {
                 const themeStatus = await processTheme(options, prefixLength, slug, outdated, item);
-                changed = true;
                 if ((themeStatus.status === 'full') || (themeStatus.status === 'partial')) {
                     success += 1;
                 } else if (themeStatus.status === 'failed') {
@@ -294,6 +293,7 @@ async function downloadFiles(options: CommandOptions, prefixLength: number, them
                 } else {
                     console.error(`Warning: unknown status after processTheme: slug=${slug}`);
                 }
+                changed = true;
                 const existing = status.map[slug].files;
                 status.map[slug].status = themeStatus.status;
                 status.map[slug].when = themeStatus.when;
@@ -305,11 +305,6 @@ async function downloadFiles(options: CommandOptions, prefixLength: number, them
                 ok = ok && (themeStatus.status !== 'failed');
             } else {
                 skipped += 1;
-                if ((status.map[slug]?.status === 'full') || (status.map[slug]?.status === 'partial')) {
-                    success += 1;
-                } else if (status.map[slug]?.status === 'failed') {
-                    failure += 1;
-                }
             }
         } else {
             console.error(`Error: unknown status: slug=${slug}`);
