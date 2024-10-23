@@ -38,7 +38,7 @@ import { getItemList, getItemLists, itemListsReport, saveItemLists } from "./lib
 /** how the script describes itself. */
 const PROGRAM_NAME: string = 'themattic';
 /** current semver */
-const VERSION: string = '0.2.2';
+const VERSION: string = '0.3.0';
 
 /**
  * How to report non-errors.

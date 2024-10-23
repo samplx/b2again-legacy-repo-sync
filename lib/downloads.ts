@@ -15,7 +15,9 @@
  */
 'use strict';
 
-import { crypto } from "jsr:@std/crypto/crypto";
+/// <reference types="npm:@types/node" />
+import { createHash } from "node:crypto";
+import { createReadStream, createWriteStream } from "node:fs";
 import { ConsoleReporter } from "./reporter.ts";
 import type { CommandOptions } from "./options.ts";
 import * as path from "jsr:@std/path";
@@ -111,42 +113,6 @@ export async function getHrefListFromPage(reporter: ConsoleReporter, url: string
 }
 
 /**
- * Calculate the sha-1 message digest of a buffer.
- * @param contents buffer to examine.
- * @returns SHA-1 of the contents as a hex string.
- */
-async function sha1sum(contents: ArrayBuffer): Promise<string> {
-    const sha256buffer = await crypto.subtle.digest('SHA-1', contents);
-    const sha256array = Array.from(new Uint8Array(sha256buffer));
-    const sha256 = sha256array.map((b) => b.toString(16).padStart(2, '0')).join('');
-    return sha256;
-}
-
-/**
- * Calculate the sha-256 message digest of a buffer.
- * @param contents buffer to examine.
- * @returns SHA-256 of the contents as a hex string.
- */
-async function sha256sum(contents: ArrayBuffer): Promise<string> {
-    const sha256buffer = await crypto.subtle.digest('SHA-256', contents);
-    const sha256array = Array.from(new Uint8Array(sha256buffer));
-    const sha256 = sha256array.map((b) => b.toString(16).padStart(2, '0')).join('');
-    return sha256;
-}
-
-/**
- * Calculate the md5 message digest of a buffer.
- * @param contents buffer to examine.
- * @returns md5 of the contents as a hex string.
- */
-async function md5sum(contents: ArrayBuffer): Promise<string> {
-    const md5buffer = await crypto.subtle.digest('MD5', contents);
-    const md5array = Array.from(new Uint8Array(md5buffer));
-    const md5 = md5array.map((b) => b.toString(16).padStart(2, '0')).join('');
-    return md5;
-}
-
-/**
  * Download a file, if required.
  * @param sourceUrl where to download the file.
  * @param targetFile where to put the file.
@@ -165,25 +131,39 @@ export async function downloadFile(reporter: ConsoleReporter, sourceUrl: URL, ta
     } catch (_) {
         needed = true;
     }
-    let sha256;
     let md5;
     let sha1;
+    let sha256;
+    const md5hash = createHash('md5');
+    const sha1hash = createHash('sha1');
+    const sha256hash = createHash('sha256');
+
     if (needed) {
         reporter(`fetch(${sourceUrl}) > ${targetFile}`);
-        const response = await fetch(sourceUrl);
-        if (!response.ok) {
-            return {
-                filename: targetFile,
-                status: 'failed',
-                when: Date.now()
-            };
-        }
-        const contents = await response.bytes();
         try {
-            sha256 = await sha256sum(contents);
-            md5 = await md5sum(contents);
-            sha1 = await sha1sum(contents);
-            Deno.writeFile(targetFile, contents, { mode: 0o644 })
+            const output = createWriteStream(targetFile, {
+                flags: 'wx',
+                encoding: 'binary'
+            });
+            const response = await fetch(sourceUrl);
+            if (!response.ok || !response.body) {
+                output.close();
+                return {
+                    filename: targetFile,
+                    status: 'failed',
+                    when: Date.now()
+                };
+            }
+            for await (const chunk of response.body) {
+                md5hash.update(chunk);
+                sha1hash.update(chunk);
+                sha256hash.update(chunk);
+                output.write(chunk);
+            }
+            md5 = md5hash.digest('hex');
+            sha1 = sha1hash.digest('hex');
+            sha256 = sha256hash.digest('hex');
+            output.close();
         } catch (_) {
             console.error(`Error: unable to save file: ${targetFile}`);
             return {
@@ -194,12 +174,31 @@ export async function downloadFile(reporter: ConsoleReporter, sourceUrl: URL, ta
         }
     } else if (needHash) {
         try {
-            const contents = await Deno.readFile(targetFile);
-            sha256 = await sha256sum(contents.buffer);
-            md5 = await md5sum(contents.buffer);
-            sha1 = await sha1sum(contents.buffer);
+            return new Promise((resolve, reject) => {
+                const input = createReadStream(targetFile);
+                input
+                    .on('end', () => {
+                        sha256 = sha256hash.digest('hex');
+                        md5 = md5hash.digest('hex');
+                        sha1 = sha1hash.digest('hex');
+                        resolve ({
+                            filename: targetFile,
+                            status: 'full',
+                            when: Date.now(),
+                            sha256,
+                            md5,
+                            sha1
+                        });
+                    })
+                    .on('data', (chunk) => {
+                        md5hash.update(chunk);
+                        sha1hash.update(chunk);
+                        sha256hash.update(chunk);
+                    })
+                    .on('error', reject);
+            });
         } catch (_) {
-            console.error(`Error: unable to read file to compute hashes: ${targetFile}`);
+            console.error(`Error: ${_} unable to read file to compute hashes: ${targetFile}`);
             return {
                 filename: targetFile,
                 status: 'failed',

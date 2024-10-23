@@ -9,7 +9,8 @@
     "jsr:@std/path@*": "1.0.6",
     "jsr:@std/path@^1.0.6": "1.0.6",
     "jsr:@std/regexp@*": "1.0.0",
-    "jsr:@std/regexp@1": "1.0.0"
+    "jsr:@std/regexp@1": "1.0.0",
+    "npm:@types/node@^22.7.8": "22.7.8"
   },
   "jsr": {
     "@std/cli@1.0.6": {
@@ -28,12 +29,24 @@
       "integrity": "158628d134c49a0858afe05017c4666f5f73d3a56602c346549ca42f3fab244a"
     }
   },
+  "npm": {
+    "@types/node@22.7.8": {
+      "integrity": "sha512-a922jJy31vqR5sk+kAdIENJjHblqcZ4RmERviFsER4WJcEONqxKcjNOlk0q7OUfrF5sddT+vng070cdfMlrPLg==",
+      "dependencies": [
+        "undici-types"
+      ]
+    },
+    "undici-types@6.19.8": {
+      "integrity": "sha512-ve2KP6f/JnbPBFyobGHuerC9g1FYGn/F8n1LWTwNxCEzd6IfqTwUQcNXgEtmmQ6DlRrC1hrSrBnCZPokRrDHjw=="
+    }
+  },
   "workspace": {
     "dependencies": [
       "jsr:@std/cli@^1.0.6",
       "jsr:@std/jsonc@^1.0.1",
       "jsr:@std/path@^1.0.6",
-      "jsr:@std/regexp@1"
+      "jsr:@std/regexp@1",
+      "npm:@types/node@^22.7.8"
     ]
   }
 }

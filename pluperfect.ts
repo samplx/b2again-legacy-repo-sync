@@ -37,7 +37,7 @@ import { getItemList, getItemLists, itemListsReport, saveItemLists } from "./lib
 /** how the script describes itself. */
 const PROGRAM_NAME: string = 'pluperfect';
 /** current semver */
-const VERSION: string = '0.2.2';
+const VERSION: string = '0.3.0';
 
 /** Poor implementation of an Either for the download results. */
 type PluginDownloadResult = DownloadErrorInfo & PluginInfo;

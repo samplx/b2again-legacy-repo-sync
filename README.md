@@ -13,30 +13,72 @@ each plugin or theme is downloaded.
 A **full** archive also includes any
 screenshot or banner files, or any preview pages, and **all** versions of **every listed** plugin or theme.
 
+The initial runs were using the `subversion` list. This is a list of plugins or themes based upon
+directory names in the subversion repositories. While this has the most number, there are large
+numbers of **404** for plugins and themes to which `api.wordpress.org` knows nothing. So, the
+code now has provisions to use different lists (see below). The default is now the list of
+`updated` plugins and themes.
+
 ### Plugins
 
-The preliminary numbers are ~30 GB for partial plugin download. Full download is ~620 GB.
+The preliminary numbers are ~30 GB for partial plugin download. Full download is ~644 GB.
 The first pass complete using the subversion repository list.
 
-```
+#### List: subversion
+
+There are a total of 103 266 plugins in the `subversion` list.
+
+```bash
 $ du -hs plugins/*
-12G	    plugins/live
-1.9G	plugins/meta
-606G	plugins/read-only
+37G	    plugins/live
+1.7G	plugins/meta
+605G	plugins/read-only
 ```
+
+#### List: updated
+
+There are a total of 60 019 plugins in the `updated` list.
+
+After a **partial** download.
+
+* [TBD]
+
+After a **full** download.
+
+* [TBD]
 
 ### Themes
 
 The preliminary numbers are ~22 GB for partial themes download and ~306 GB for a full download.
 The list of themes is taken from the subversion repository HTML page at `https://themes.svn.wordpress.org/`.
 
-```
+#### List: subversion
+
+There are 27 531 themes in the `subversion` list.
+
+```bash
 $ du -hs themes/*
 5.0G	themes/live
 351M	themes/meta
 301G	themes/read-only
-100M	themes/themes-status.json
 ```
+
+#### List: updated
+
+There are 12 984 themes in the `updated` list.
+
+Summary of a recent run using the `updated` list gives:
+
+```text
+Total themes processed:   12984
+```
+
+The execution of `thematic.ts --full --retry`, which uses the default `update`
+list on a 2 GB Droplet takes a little over 3 minutes.
+This would need to be executed periodically to keep the repo up-to-date with upstream.
+It is not clear what the expected arrival rate is for new theme versions. A once every four hours update rate
+seems like a reasonable starting point that would not put significant demand on upsteam resources.
+Although once a day may be sufficient for most needs.
 
 ## pluperfect.ts
 
