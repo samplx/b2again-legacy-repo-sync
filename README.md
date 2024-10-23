@@ -37,11 +37,26 @@ $ du -hs plugins/*
 
 #### List: updated
 
-There are a total of 60 019 plugins in the `updated` list.
+There are a total of 60 023 plugins in the `updated` list.
 
 After a **partial** download.
 
-* [TBD]
+```bash
+$ du -hs plugins/*
+1.7G	plugins/meta
+33G	    plugins/read-only
+```
+
+```text
+pluperfect v0.3.0
+started:   Wed, 23 Oct 2024 05:42:15 GMT
+...
+Total plugins processed:  60023
+Total successful:         59840
+Total failures:           12
+Total skipped:            171
+completed: Wed, 23 Oct 2024 13:09:56 GMT
+```
 
 After a **full** download.
 
@@ -67,11 +82,26 @@ $ du -hs themes/*
 
 There are 12 984 themes in the `updated` list.
 
-Summary of a recent run using the `updated` list gives:
+After a **partial** download.
+
+```bash
+$ du -hs themes/*
+209M	themes/meta
+18G	    themes/read-only
+```
 
 ```text
 Total themes processed:   12984
+Total successful:         12983
+Total failures:           1
 ```
+
+The download on a 2 GB Droplet took 2 hours and 8 minutes.
+
+After a **full** download.
+
+[TBD]
+
 
 The execution of `thematic.ts --full --retry`, which uses the default `update`
 list on a 2 GB Droplet takes a little over 3 minutes.
@@ -101,9 +131,10 @@ It is hard to justify a need for up-to-the-minute mirroring, when a
 once a day update schedule may meet most needs.
 Again, it is open source, so someone can multi-thread it if they want.
 
-The current implementation is also has a considerable memory footprint.
+<s>The current implementation is also has a considerable memory footprint.
 It requires a 8GB Droplet to download the plugins. A 2GB Droplet was able
-to download the themes. Future versions may address this.
+to download the themes. Future versions may address this.</s>
+After version `0.3.0`, a 2 GB Droplet was able to download both themes and plugins.
 
 ## Lists
 
