@@ -37,7 +37,7 @@ import { getItemList, getItemLists, itemListsReport, saveItemLists } from "./lib
 /** how the script describes itself. */
 const PROGRAM_NAME: string = 'pluperfect';
 /** current semver */
-const VERSION: string = '0.2.1';
+const VERSION: string = '0.2.2';
 
 /** Poor implementation of an Either for the download results. */
 type PluginDownloadResult = DownloadErrorInfo & PluginInfo;
@@ -162,7 +162,7 @@ async function processPlugin(
                         for (const id of Object.keys(pluginInfo.screenshots)) {
                             if (typeof pluginInfo.screenshots[id]?.src === 'string') {
                                 const src = new URL(pluginInfo.screenshots[id]?.src);
-                                const filename = src.pathname.substring(src.pathname.lastIndexOf('/')+1);
+                                const filename = path.basename(src.pathname);
                                 const screenshot = path.join(screenshotsDir, filename);
                                 const fileInfo = await downloadFile(reporter, src, screenshot, options.force, options.rehash);
                                 files[fileInfo.filename] = fileInfo;
@@ -176,7 +176,7 @@ async function processPlugin(
                         await Deno.mkdir(bannersDir, { recursive: true });
                         if (typeof pluginInfo.banners?.high === 'string') {
                             const src = new URL(pluginInfo.banners.high);
-                            const filename = src.pathname.substring(src.pathname.lastIndexOf('/')+1);
+                            const filename = path.basename(src.pathname);
                             const screenshot = path.join(bannersDir, filename);
                             const fileInfo = await downloadFile(reporter, src, screenshot, options.force, options.rehash);
                             files[fileInfo.filename] = fileInfo;
@@ -184,7 +184,7 @@ async function processPlugin(
                         }
                         if (typeof pluginInfo.banners?.low === 'string') {
                             const src = new URL(pluginInfo.banners.low);
-                            const filename = src.pathname.substring(src.pathname.lastIndexOf('/')+1);
+                            const filename = path.basename(src.pathname);
                             const screenshot = path.join(bannersDir, filename);
                             const fileInfo = await downloadFile(reporter, src, screenshot, options.force, options.rehash);
                             files[fileInfo.filename] = fileInfo;

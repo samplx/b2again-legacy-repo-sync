@@ -38,7 +38,7 @@ import { getItemList, getItemLists, itemListsReport, saveItemLists } from "./lib
 /** how the script describes itself. */
 const PROGRAM_NAME: string = 'themattic';
 /** current semver */
-const VERSION: string = '0.2.1';
+const VERSION: string = '0.2.2';
 
 /**
  * How to report non-errors.
@@ -118,8 +118,7 @@ async function processTheme(
                         await Deno.mkdir(screenshotsDir, { recursive: true });
                         // some ts.w.org URL's don't have a scheme?
                         const screenshotUrl = new URL(themeInfo.screenshot_url.startsWith('//') ? `https:${themeInfo.screenshot_url}` : themeInfo.screenshot_url);
-                        const screenshotFile = path.join(screenshotsDir,
-                            screenshotUrl.pathname.substring(screenshotUrl.pathname.lastIndexOf('/')+1));
+                        const screenshotFile = path.join(screenshotsDir, path.basename(screenshotUrl.pathname));
                         const screenshotInfo = await downloadFile(reporter, screenshotUrl, screenshotFile, options.force, options.rehash);
                         ok = ok && (screenshotInfo.status === 'full');
                         files[screenshotInfo.filename] = screenshotInfo;
