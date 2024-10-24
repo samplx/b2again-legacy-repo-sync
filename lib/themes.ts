@@ -149,8 +149,13 @@ export function migrateThemeInfo(downloadsBaseUrl: string,
             kleen.sections.description = fromAPI.description;
         }
     }
-    if (!kleen.parent && fromAPI.parent) {
+    if (kleen.parent) {
+        kleen.parent = { ... kleen.parent };
+    } else if (fromAPI.parent) {
         kleen.parent = { ...fromAPI.parent };
+    }
+    if (kleen.parent && typeof kleen?.parent?.slug === 'string') {
+        kleen.parent.homepage = getHomepageUrl(supportBaseUrl, kleen.parent.slug);
     }
     if (!kleen.template && fromAPI.template) {
         kleen.template = fromAPI.template;

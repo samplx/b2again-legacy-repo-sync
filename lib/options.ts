@@ -74,6 +74,9 @@ export interface CommandOptions {
     /** name of JSON file containing the lists from the API server. */
     listsFilename: string;
 
+    /** flag indicating that "live" files should be downloaded. */
+    live: boolean;
+
     /** number of items processed between saves of the status file (as a string). */
     pace: string;
 
@@ -104,6 +107,9 @@ export interface CommandOptions {
     /** flag indicating a request to print the version. */
     version: boolean;
 
+    /** flag indicating that all versions of zip files should be downloaded */
+    zips: boolean;
+
     /**
      * a "hidden" flag used for debugging/testing.
      * If true, use a fixed list of slugs rather
@@ -118,6 +124,7 @@ export interface CommandOptions {
 export function getParseOptions(itemType: ItemTypeName): ParseOptions {
     return {
         default: {
+            DEBUG_USE_FIXED_SLUGS: false,
             apiHost: 'api.wordpress.org',
             documentRoot: 'build',
             downloadsBaseUrl: 'https://downloads.b2again.org/',
@@ -131,6 +138,7 @@ export function getParseOptions(itemType: ItemTypeName): ParseOptions {
             list: 'updated',
             lists: false,
             listsFilename: 'legacy-lists.json',
+            live: false,
             pace: `${DEFAULT_PACE}`,
             prefixLength: `${DEFAULT_PREFIX_LENGTH}`,
             quiet: false,
@@ -141,19 +149,21 @@ export function getParseOptions(itemType: ItemTypeName): ParseOptions {
             supportBaseUrl: 'https://support.b2again.org/',
             verbose: false,
             version: false,
-            DEBUG_USE_FIXED_SLUGS: false,
+            zips: false,
         },
         boolean: [
+            'DEBUG_USE_FIXED_SLUGS',
             'force',
             'full',
             'help',
             'lists',
+            'live',
             'quiet',
             'rehash',
             'retry',
             'version',
             'verbose',
-            'DEBUG_USE_FIXED_SLUGS'
+            'zips'
         ],
         string: [
             'apiHost',
@@ -214,6 +224,8 @@ export function printHelp(programName: string, parseOptions: ParseOptions): void
     console.log(`    load all lists and save to listsFilename.`);
     console.log(`--listsFilename=name       [${parseOptions.default?.listsFilename}]`);
     console.log(`    JSON file of lists of legacy information.`);
+    console.log(`--live                     [${parseOptions.default?.live}]`);
+    console.log(`    download "live" files.`);
     console.log(`--pace=number              [${parseOptions.default?.pace}]`);
     console.log(`    number of items processed between status file saves.`);
     console.log(`--prefixLength=number      [${parseOptions.default?.prefixLength}]`);
@@ -234,6 +246,8 @@ export function printHelp(programName: string, parseOptions: ParseOptions): void
     console.log(`    be verbose. include more informational messages.`);
     console.log(`--version`);
     console.log(`    print program version and exit.`);
+    console.log(`--zips                     [${parseOptions.default?.zips}]`);
+    console.log(`    download all zip files.`);
 }
 
 /**

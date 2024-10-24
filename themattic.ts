@@ -38,7 +38,7 @@ import { getItemList, getItemLists, itemListsReport, saveItemLists } from "./lib
 /** how the script describes itself. */
 const PROGRAM_NAME: string = 'themattic';
 /** current semver */
-const VERSION: string = '0.4.0';
+const VERSION: string = '0.5.0';
 
 /**
  * How to report non-errors.
@@ -100,7 +100,7 @@ async function processTheme(
                 const fileInfo = await downloadZip(reporter, options, themeInfo.download_link, themeReadOnlyDir);
                 ok = ok && (fileInfo.status === 'full');
                 files[fileInfo.filename] = fileInfo;
-                if (options.full) {
+                if (options.full || options.live) {
                     let changed = false;
                     if ((typeof themeInfo.preview_url === 'string') && (typeof migratedTheme.preview_url === 'string')) {
                         // preview_url
@@ -127,6 +127,11 @@ async function processTheme(
                         migratedTheme.screenshot_url = `${options.downloadsBaseUrl}${screenshotInfo.filename.substring(options.documentRoot.length+1)}`;
                         changed = true;
                     }
+                    if (changed) {
+                        await saveThemeInfo(options, themeMetaDir, migratedTheme);
+                    }
+                }
+                if (options.full || options.zips) {
                     if (typeof themeInfo.versions === 'object') {
                         for (const version in themeInfo.versions) {
                             if (version !== 'trunk') {
@@ -135,9 +140,6 @@ async function processTheme(
                                 ok = ok && (fileInfo.status === 'full');
                             }
                         }
-                    }
-                    if (changed) {
-                        await saveThemeInfo(options, themeMetaDir, migratedTheme);
                     }
                 }
             }

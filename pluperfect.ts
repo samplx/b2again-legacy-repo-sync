@@ -38,7 +38,7 @@ import { getItemList, getItemLists, itemListsReport, saveItemLists } from "./lib
 /** how the script describes itself. */
 const PROGRAM_NAME: string = 'pluperfect';
 /** current semver */
-const VERSION: string = '0.4.0';
+const VERSION: string = '0.5.0';
 
 /** Poor implementation of an Either for the download results. */
 type PluginDownloadResult = DownloadErrorInfo & PluginInfo;
@@ -161,17 +161,8 @@ async function processPlugin(
                 const fileInfo = await downloadZip(reporter, options, pluginInfo.download_link, pluginReadOnlyDir);
                 ok = ok && (fileInfo.status === 'full');
                 files[fileInfo.filename] = fileInfo;
-                if (options.full) {
+                if (options.full || options.live) {
                     let changed = false;
-                    if (typeof pluginInfo.versions === 'object') {
-                        for (const version of Object.keys(pluginInfo.versions)) {
-                            if ((version !== 'trunk') && pluginInfo.versions[version]) {
-                                const fileInfo = await downloadZip(reporter, options, pluginInfo.versions[version], pluginReadOnlyDir);
-                                files[fileInfo.filename] = fileInfo;
-                                ok = ok && (fileInfo.status === 'full');
-                            }
-                        }
-                    }
                     if ((typeof pluginInfo.preview_link === 'string') &&
                         (pluginInfo.preview_link !== '') &&
                         (typeof migratedInfo.preview_link === 'string')) {
@@ -231,6 +222,17 @@ async function processPlugin(
                     if (changed) {
                         updateScreenshotText(pluginInfo, migratedInfo);
                         await savePluginInfo(options, pluginMetaDir, migratedInfo);
+                    }
+                }
+                if (options.full || options.zips) {
+                    if (typeof pluginInfo.versions === 'object') {
+                        for (const version of Object.keys(pluginInfo.versions)) {
+                            if ((version !== 'trunk') && pluginInfo.versions[version]) {
+                                const fileInfo = await downloadZip(reporter, options, pluginInfo.versions[version], pluginReadOnlyDir);
+                                files[fileInfo.filename] = fileInfo;
+                                ok = ok && (fileInfo.status === 'full');
+                            }
+                        }
                     }
                 }
             }
