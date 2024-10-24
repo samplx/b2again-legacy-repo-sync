@@ -162,6 +162,7 @@ export function migratePluginInfo(
         // kleen is a shallow copy, deepen it before we mutate it
         kleen.screenshots = { ...kleen.screenshots };
         for (const key in kleen.screenshots) {
+            kleen.screenshots[key] = { ...kleen.screenshots[key] };
             if (typeof kleen.screenshots[key].src == 'string') {
                 const updated = getScreenshotUrl(downloadsBaseUrl, split, kleen.screenshots[key].src);
                 screenshotMap[kleen.screenshots[key].src] = updated;
@@ -173,15 +174,6 @@ export function migratePluginInfo(
         kleen.sections = { ...kleen.sections };
         if (typeof kleen.sections?.reviews === 'string') {
             kleen.sections.reviews = undefined;
-        }
-        if (typeof kleen.sections?.screenshots === 'string') {
-            let contents = kleen.sections.screenshots;
-            for (const old in screenshotMap) {
-                const search = new RegExp(escape(old), 'g');
-                const replacement = screenshotMap[old];
-                contents = contents.replaceAll(search, replacement);
-            }
-            kleen.sections.screenshots = contents;
         }
     }
     kleen.support_threads = 0;

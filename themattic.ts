@@ -89,7 +89,7 @@ async function processTheme(
         vreporter(`> mkdir -p ${themeMetaDir}`);
         await Deno.mkdir(themeMetaDir, { recursive: true });
 
-        const themeInfo = await handleThemeInfo(options, themeMetaDir, infoUrl, split, outdated || options.force, fromAPI);
+        const [ themeInfo, migratedTheme ] = await handleThemeInfo(options, themeMetaDir, infoUrl, split, outdated || options.force, fromAPI);
         if (themeInfo) {
             if ((typeof themeInfo.slug !== 'string') ||
                 (typeof themeInfo.error === 'string') ||
@@ -101,7 +101,8 @@ async function processTheme(
                 ok = ok && (fileInfo.status === 'full');
                 files[fileInfo.filename] = fileInfo;
                 if (options.full) {
-                    if (typeof themeInfo.preview_url === 'string') {
+                    let changed = false;
+                    if ((typeof themeInfo.preview_url === 'string') && (typeof migratedTheme.preview_url === 'string')) {
                         // preview_url
                         const previewDir = path.join(themeLiveDir, 'preview');
                         vreporter(`> mkdir -p ${previewDir}`);
@@ -110,6 +111,8 @@ async function processTheme(
                         const previewInfo = await downloadLiveFile(reporter, previewUrl, previewDir, 'index.html', options.hashLength);
                         ok = ok && (previewInfo.status === 'full');
                         files[previewInfo.filename] = previewInfo;
+                        migratedTheme.preview_url = `${options.downloadsBaseUrl}${previewInfo.filename.substring(options.documentRoot.length+1)}`;
+                        changed = true;
                     }
                     if (typeof themeInfo.screenshot_url === 'string') {
                         // screenshot_url
@@ -121,6 +124,8 @@ async function processTheme(
                         const screenshotInfo = await downloadLiveFile(reporter, screenshotUrl, screenshotsDir, path.basename(screenshotUrl.pathname), options.hashLength);
                         ok = ok && (screenshotInfo.status === 'full');
                         files[screenshotInfo.filename] = screenshotInfo;
+                        migratedTheme.screenshot_url = `${options.downloadsBaseUrl}${screenshotInfo.filename.substring(options.documentRoot.length+1)}`;
+                        changed = true;
                     }
                     if (typeof themeInfo.versions === 'object') {
                         for (const version in themeInfo.versions) {
@@ -130,6 +135,9 @@ async function processTheme(
                                 ok = ok && (fileInfo.status === 'full');
                             }
                         }
+                    }
+                    if (changed) {
+                        await saveThemeInfo(options, themeMetaDir, migratedTheme);
                     }
                 }
             }
@@ -183,7 +191,7 @@ async function handleThemeInfo(
     split: string,
     force: boolean,
     fromAPI: ThemeInfo
-): Promise<ThemeDownloadResult> {
+): Promise<Array<ThemeDownloadResult>> {
     const themeJson = path.join(themeMetaDir, 'theme.json');
     const legacyThemeJson = path.join(themeMetaDir, 'legacy-theme.json');
     try {
@@ -199,16 +207,31 @@ async function handleThemeInfo(
         if (!response.ok) {
             const error = `${response.status} ${response.statusText}`;
             reporter(`fetch failed: ${error}`);
-            return { error };
+            return [{ error }, { error }];
         }
         const json = await response.json();
         const rawText = JSON.stringify(json, null, options.jsonSpaces);
         const migrated = migrateThemeInfo(options.downloadsBaseUrl, options.supportBaseUrl, split, json, fromAPI);
-        const text = JSON.stringify(migrated, null, options.jsonSpaces);
-        await Deno.writeTextFile(themeJson, text);
+        await saveThemeInfo(options, themeMetaDir, migrated);
         await Deno.writeTextFile(legacyThemeJson, rawText);
-        return json;
+        return [json, migrated];
     }
+}
+
+/**
+ * Persist theme information.
+ * @param options command-line options.
+ * @param themeMetaDir where meta data is to be stored.
+ * @param info information about a theme.
+ */
+async function saveThemeInfo(
+    options: CommandOptions,
+    themeMetaDir: string,
+    info: ThemeInfo
+): Promise<void> {
+    const themeJson = path.join(themeMetaDir, 'theme.json');
+    const text = JSON.stringify(info, null, options.jsonSpaces);
+    await Deno.writeTextFile(themeJson, text);
 }
 
 /**

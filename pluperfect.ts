@@ -26,6 +26,7 @@ import {
     readDownloadStatus,
     saveDownloadStatus
 } from "./lib/downloads.ts";
+import { escape } from "jsr:@std/regexp";
 import { printSplitSummary, splitFilename } from "./lib/split-filename.ts";
 import { migratePluginInfo, PluginInfo } from "./lib/plugins.ts";
 import { parseArgs, ParseOptions } from "jsr:@std/cli/parse-args";
@@ -74,7 +75,7 @@ async function handlePluginInfo(
     split: string,
     force: boolean,
     fromAPI: PluginInfo
-): Promise<PluginDownloadResult> {
+): Promise<Array<PluginDownloadResult>> {
     const pluginJson = path.join(pluginMetaDir, 'plugin.json');
     const legacyPluginJson = path.join(pluginMetaDir, 'legacy-plugin.json');
 
@@ -91,17 +92,32 @@ async function handlePluginInfo(
         if (!response.ok) {
             const error = `${response.status} ${response.statusText}`;
             reporter(`fetch failed: ${error}`);
-            return { error };
+            return [{ error }, { error }];
         }
         const json = await response.json();
         const rawText = JSON.stringify(json, null, options.jsonSpaces);
         const migrated = migratePluginInfo(options.downloadsBaseUrl,
                 options.supportBaseUrl, split, json, fromAPI);
-        const text = JSON.stringify(migrated, null, options.jsonSpaces);
-        await Deno.writeTextFile(pluginJson, text);
+        await savePluginInfo(options, pluginMetaDir, migrated);
         await Deno.writeTextFile(legacyPluginJson, rawText);
-        return json;
+        return [ json, migrated ];
     }
+}
+
+/**
+ * Persist plugin information to a `plugin.json` file.
+ * @param options command-line options.
+ * @param pluginMetaDir where to save the meta data.
+ * @param info plugin information to be saved.
+ */
+async function savePluginInfo(
+    options: CommandOptions,
+    pluginMetaDir: string,
+    info: PluginInfo
+): Promise<void> {
+    const pluginJson = path.join(pluginMetaDir, 'plugin.json');
+    const text = JSON.stringify(info, null, options.jsonSpaces);
+    await Deno.writeTextFile(pluginJson, text);
 }
 
 /**
@@ -133,7 +149,7 @@ async function processPlugin(
         vreporter(`> mkdir -p ${pluginMetaDir}`);
         await Deno.mkdir(pluginMetaDir, { recursive: true });
 
-        const pluginInfo = await handlePluginInfo(options, pluginMetaDir,
+        const [ pluginInfo, migratedInfo ] = await handlePluginInfo(options, pluginMetaDir,
                 infoUrl, split, (outdated || options.force), fromAPI);
         if (pluginInfo) {
             if ((typeof pluginInfo.slug !== 'string') ||
@@ -146,6 +162,7 @@ async function processPlugin(
                 ok = ok && (fileInfo.status === 'full');
                 files[fileInfo.filename] = fileInfo;
                 if (options.full) {
+                    let changed = false;
                     if (typeof pluginInfo.versions === 'object') {
                         for (const version of Object.keys(pluginInfo.versions)) {
                             if ((version !== 'trunk') && pluginInfo.versions[version]) {
@@ -155,29 +172,50 @@ async function processPlugin(
                             }
                         }
                     }
+                    if ((typeof pluginInfo.preview_link === 'string') &&
+                        (pluginInfo.preview_link !== '') &&
+                        (typeof migratedInfo.preview_link === 'string')) {
+                        // preview_link
+                        const previewDir = path.join(pluginLiveDir, 'preview');
+                        vreporter(`> mkdir -p ${previewDir}`);
+                        await Deno.mkdir(previewDir, { recursive: true });
+                        const previewUrl = new URL(pluginInfo.preview_link);
+                        const previewInfo = await downloadLiveFile(reporter, previewUrl, previewDir, 'index.html', options.hashLength);
+                        ok = ok && (previewInfo.status === 'full');
+                        files[previewInfo.filename] = previewInfo;
+                        migratedInfo.preview_link = `${options.downloadsBaseUrl}${previewInfo.filename.substring(options.documentRoot.length+1)}`;
+                        changed = true;
+                    }
                     if ((typeof pluginInfo.screenshots === 'object') && !Array.isArray(pluginInfo.screenshots)) {
                         const screenshotsDir = path.join(pluginLiveDir, 'screenshots');
                         vreporter(`> mkdir -p ${screenshotsDir}`);
                         await Deno.mkdir(screenshotsDir, { recursive: true });
                         for (const id of Object.keys(pluginInfo.screenshots)) {
-                            if (typeof pluginInfo.screenshots[id]?.src === 'string') {
+                            if ((typeof pluginInfo.screenshots[id]?.src === 'string') && migratedInfo.screenshots){
                                 const src = new URL(pluginInfo.screenshots[id]?.src);
                                 const filename = path.basename(src.pathname);
                                 const fileInfo = await downloadLiveFile(reporter, src, screenshotsDir, filename, options.hashLength);
                                 files[fileInfo.filename] = fileInfo;
+                                migratedInfo.screenshots[id].src = `${options.downloadsBaseUrl}${fileInfo.filename.substring(options.documentRoot.length+1)}`;
+                                changed = true;
                                 ok = ok && (fileInfo.status === 'full');
                             }
                         }
                     }
-                    if ((typeof pluginInfo.banners === 'object') && !Array.isArray(pluginInfo.banners)) {
+                    if ((typeof pluginInfo.banners === 'object') &&
+                        !Array.isArray(pluginInfo.banners) &&
+                        (typeof migratedInfo.banners === 'object') &&
+                        !Array.isArray(migratedInfo.banners)) {
                         const bannersDir = path.join(pluginLiveDir, 'banners');
                         vreporter(`> mkdir -p ${bannersDir}`);
                         await Deno.mkdir(bannersDir, { recursive: true });
-                        if (typeof pluginInfo.banners?.high === 'string') {
+                        if ((typeof pluginInfo.banners?.high === 'string') && (typeof migratedInfo?.banners?.high === 'string')) {
                             const src = new URL(pluginInfo.banners.high);
                             const filename = path.basename(src.pathname);
                             const fileInfo = await downloadLiveFile(reporter, src, bannersDir, filename, options.hashLength);
                             files[fileInfo.filename] = fileInfo;
+                            migratedInfo.banners.high = `${options.downloadsBaseUrl}${fileInfo.filename.substring(options.documentRoot.length+1)}`;
+                            changed = true;
                             ok = ok && (fileInfo.status === 'full');
                         }
                         if (typeof pluginInfo.banners?.low === 'string') {
@@ -185,8 +223,14 @@ async function processPlugin(
                             const filename = path.basename(src.pathname);
                             const fileInfo = await downloadLiveFile(reporter, src, bannersDir, filename, options.hashLength);
                             files[fileInfo.filename] = fileInfo;
+                            migratedInfo.banners.low = `${options.downloadsBaseUrl}${fileInfo.filename.substring(options.documentRoot.length+1)}`;
+                            changed = true;
                             ok = ok && (fileInfo.status === 'full');
                         }
+                    }
+                    if (changed) {
+                        updateScreenshotText(pluginInfo, migratedInfo);
+                        await savePluginInfo(options, pluginMetaDir, migratedInfo);
                     }
                 }
             }
@@ -202,6 +246,27 @@ async function processPlugin(
         files,
         last_updated_time
     };
+}
+
+/**
+ * Replace old URL's with new ones in the screenshot summary text.
+ * @param original plugin information from upstream
+ * @param migrated localized version of plugin information
+ */
+function updateScreenshotText(original: PluginInfo, migrated: PluginInfo): void {
+    migrated.sections = { ... migrated.sections };
+    if ((typeof migrated.sections?.screenshots === 'string') && (typeof migrated?.screenshots === 'object')) {
+        let contents = migrated.sections.screenshots;
+        for (const key in original.screenshots) {
+            if ((typeof original.screenshots[key].src === 'string') && (typeof migrated?.screenshots[key].src === 'string')) {
+                const search = new RegExp(escape(original.screenshots[key].src), 'g');
+                const replacement = migrated.screenshots[key].src;
+                contents = contents.replaceAll(search, replacement);
+            }
+        }
+        migrated.sections.screenshots = contents;
+    }
+
 }
 
 /**
