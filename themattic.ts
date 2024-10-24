@@ -18,13 +18,13 @@
 
 import {
     DownloadErrorInfo,
-    downloadFile,
     DownloadFileInfo,
     GroupDownloadInfo,
     readDownloadStatus,
     saveDownloadStatus,
     mergeDownloadInfo,
-    downloadZip
+    downloadZip,
+    downloadLiveFile
 } from "./lib/downloads.ts";
 import { CommandOptions, DEFAULT_PACE, isValidListType, printHelp } from "./lib/options.ts";
 import { printSplitSummary, splitFilename } from "./lib/split-filename.ts";
@@ -38,7 +38,7 @@ import { getItemList, getItemLists, itemListsReport, saveItemLists } from "./lib
 /** how the script describes itself. */
 const PROGRAM_NAME: string = 'themattic';
 /** current semver */
-const VERSION: string = '0.3.1';
+const VERSION: string = '0.4.0';
 
 /**
  * How to report non-errors.
@@ -106,8 +106,8 @@ async function processTheme(
                         const previewDir = path.join(themeLiveDir, 'preview');
                         vreporter(`> mkdir -p ${previewDir}`);
                         await Deno.mkdir(previewDir, { recursive: true });
-                        const previewIndex = path.join(previewDir, 'index.html');
-                        const previewInfo = await downloadFile(reporter, new URL(themeInfo.preview_url), previewIndex, options.force, options.rehash);
+                        const previewUrl = new URL(themeInfo.preview_url);
+                        const previewInfo = await downloadLiveFile(reporter, previewUrl, previewDir, 'index.html', options.hashLength);
                         ok = ok && (previewInfo.status === 'full');
                         files[previewInfo.filename] = previewInfo;
                     }
@@ -118,8 +118,7 @@ async function processTheme(
                         await Deno.mkdir(screenshotsDir, { recursive: true });
                         // some ts.w.org URL's don't have a scheme?
                         const screenshotUrl = new URL(themeInfo.screenshot_url.startsWith('//') ? `https:${themeInfo.screenshot_url}` : themeInfo.screenshot_url);
-                        const screenshotFile = path.join(screenshotsDir, path.basename(screenshotUrl.pathname));
-                        const screenshotInfo = await downloadFile(reporter, screenshotUrl, screenshotFile, options.force, options.rehash);
+                        const screenshotInfo = await downloadLiveFile(reporter, screenshotUrl, screenshotsDir, path.basename(screenshotUrl.pathname), options.hashLength);
                         ok = ok && (screenshotInfo.status === 'full');
                         files[screenshotInfo.filename] = screenshotInfo;
                     }

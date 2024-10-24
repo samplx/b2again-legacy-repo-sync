@@ -18,8 +18,8 @@
 
 import {
     DownloadErrorInfo,
-    downloadFile,
     DownloadFileInfo,
+    downloadLiveFile,
     downloadZip,
     GroupDownloadInfo,
     mergeDownloadInfo,
@@ -37,7 +37,7 @@ import { getItemList, getItemLists, itemListsReport, saveItemLists } from "./lib
 /** how the script describes itself. */
 const PROGRAM_NAME: string = 'pluperfect';
 /** current semver */
-const VERSION: string = '0.3.1';
+const VERSION: string = '0.4.0';
 
 /** Poor implementation of an Either for the download results. */
 type PluginDownloadResult = DownloadErrorInfo & PluginInfo;
@@ -163,8 +163,7 @@ async function processPlugin(
                             if (typeof pluginInfo.screenshots[id]?.src === 'string') {
                                 const src = new URL(pluginInfo.screenshots[id]?.src);
                                 const filename = path.basename(src.pathname);
-                                const screenshot = path.join(screenshotsDir, filename);
-                                const fileInfo = await downloadFile(reporter, src, screenshot, options.force, options.rehash);
+                                const fileInfo = await downloadLiveFile(reporter, src, screenshotsDir, filename, options.hashLength);
                                 files[fileInfo.filename] = fileInfo;
                                 ok = ok && (fileInfo.status === 'full');
                             }
@@ -177,16 +176,14 @@ async function processPlugin(
                         if (typeof pluginInfo.banners?.high === 'string') {
                             const src = new URL(pluginInfo.banners.high);
                             const filename = path.basename(src.pathname);
-                            const screenshot = path.join(bannersDir, filename);
-                            const fileInfo = await downloadFile(reporter, src, screenshot, options.force, options.rehash);
+                            const fileInfo = await downloadLiveFile(reporter, src, bannersDir, filename, options.hashLength);
                             files[fileInfo.filename] = fileInfo;
                             ok = ok && (fileInfo.status === 'full');
                         }
                         if (typeof pluginInfo.banners?.low === 'string') {
                             const src = new URL(pluginInfo.banners.low);
                             const filename = path.basename(src.pathname);
-                            const screenshot = path.join(bannersDir, filename);
-                            const fileInfo = await downloadFile(reporter, src, screenshot, options.force, options.rehash);
+                            const fileInfo = await downloadLiveFile(reporter, src, bannersDir, filename, options.hashLength);
                             files[fileInfo.filename] = fileInfo;
                             ok = ok && (fileInfo.status === 'full');
                         }

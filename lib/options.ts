@@ -50,6 +50,9 @@ export interface CommandOptions {
     /** true if all files should be downloaded. */
     full: boolean;
 
+    /** maximum number of characters to put into the hash for live file caches */
+    hashLength: number;
+
     /** true if user requested help. */
     help: boolean;
 
@@ -121,6 +124,7 @@ export function getParseOptions(itemType: ItemTypeName): ParseOptions {
             downloadsHost: 'downloads.wordpress.org',
             force: false,
             full: false,
+            hashLength: 20,
             help: false,
             interestingFilename: `interesting-${itemType}s.jsonc`,
             jsonSpaces: '    ',
@@ -155,6 +159,7 @@ export function getParseOptions(itemType: ItemTypeName): ParseOptions {
             'apiHost',
             'documentRoot',
             'downloadsHost',
+            'hashLength',
             'interestingFilename',
             'jsonSpaces',
             'limit',
@@ -193,6 +198,8 @@ export function printHelp(programName: string, parseOptions: ParseOptions): void
     console.log(`    force download of files.`);
     console.log(`--full                     [${parseOptions.default?.full}]`);
     console.log(`    full archive. include all versions, screenshots, and previews`);
+    console.log(`--hashLength=number        [${parseOptions.default?.hashLength}]`);
+    console.log(`    number of characters in live file cache hash.`);
     console.log(`--help`);
     console.log(`    print this message and exit.`);
     console.log(`--interestingFilename=name [${parseOptions.default?.interestingFilename}]`);

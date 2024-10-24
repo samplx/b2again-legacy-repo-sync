@@ -114,13 +114,20 @@ export async function getHrefListFromPage(reporter: ConsoleReporter, url: string
 
 /**
  * Download a file, if required.
+ * @param reporter how to report non-error information.
  * @param sourceUrl where to download the file.
  * @param targetFile where to put the file.
  * @param [force=false] if we must download file the even if we have a copy.
  * @param [needHash=false] if we should read the file if it exists to calculate the hash.
  * @returns true if download was successful, false if not.
  */
-export async function downloadFile(reporter: ConsoleReporter, sourceUrl: URL, targetFile: string, force: boolean = false, needHash: boolean = false): Promise<DownloadFileInfo> {
+export async function downloadFile(
+    reporter: ConsoleReporter,
+    sourceUrl: URL,
+    targetFile: string,
+    force: boolean = false,
+    needHash: boolean = false
+): Promise<DownloadFileInfo> {
     let needed = false;
     try {
         const fileInfo = await Deno.lstat(targetFile)
@@ -298,9 +305,14 @@ export function mergeDownloadInfo(existing: undefined | DownloadFileInfo, recent
  * Download a zip file, if required.
  * @param sourceUrl where to download the zip file.
  * @param targetDir where to put the zip file.
- * @returns true if download was successful, false if not.
+ * @returns information about the download.
  */
-export async function downloadZip(reporter: ConsoleReporter, options: CommandOptions, sourceUrl: string, targetDir: string): Promise<DownloadFileInfo> {
+export async function downloadZip(
+    reporter: ConsoleReporter,
+    options: CommandOptions,
+    sourceUrl: string,
+    targetDir: string
+): Promise<DownloadFileInfo> {
     const zipFilename = path.join(targetDir, sourceUrl.substring(sourceUrl.lastIndexOf('/')+1));
     try {
         await Deno.chmod(zipFilename, 0o644);
@@ -312,6 +324,70 @@ export async function downloadZip(reporter: ConsoleReporter, options: CommandOpt
         await Deno.chmod(zipFilename, 0o444);
     } catch (_) {
         reporter(`Warning: chmod(${zipFilename}, 0o444) failed`);
+    }
+    return info;
+}
+
+/**
+ * Add a cache busting middle section to a filename.
+ * @param name original filename.
+ * @param middle the cache stamp middle.
+ * @param middleLength how many characters to keep in the middle.
+ * @returns 'chunkhash'd filename.
+ */
+function liveFilename(name: string, middle: string, middleLength: number): string {
+    const center = (middleLength > middle.length) ? middle : middle.substring(0, middleLength);
+    const lastDot = name.lastIndexOf('.');
+    if (lastDot < 0) {
+        return `${name}-${center}`;
+    }
+    const front = name.substring(0, lastDot);
+    const ext = name.substring(lastDot).toLowerCase();
+    return `${front}-${center}${ext}`;
+}
+
+/**
+ * Download a 'live' file. A mutable file that will be downloaded
+ * and then renamed based upon its content. Since we do not know
+ * the SHA-256 before we download it, we will always download the
+ * file. Then the SHA-256 is used to rename the file. If there is
+ * a collision, the files contents are assumed to be the same.
+ * We preserve the old file when there is a collision in order to
+ * keep the old timestamps.
+ * @param reporter how to report non-error information.
+ * @param sourceUrl what is to be downloaded.
+ * @param targetDir directory part of the target filename.
+ * @param originalName original filename part of the URL.
+ * @param middleLength number of characters in the 'hash' portion.
+ * @returns information about the downloaded file, including its new name.
+ */
+export async function downloadLiveFile(
+    reporter: ConsoleReporter,
+    sourceUrl: URL,
+    targetDir: string,
+    originalName: string,
+    middleLength: number
+): Promise<DownloadFileInfo> {
+    const filename = path.join(targetDir, liveFilename(originalName, 'download', middleLength));
+    const info = await downloadFile(reporter, sourceUrl, filename, true);
+    if ((info.status === 'full') && (typeof info.sha256 === 'string')) {
+        const finalName = path.join(targetDir, liveFilename(originalName, info.sha256, middleLength));
+        const updated = { ... info };
+        updated.filename = finalName;
+        try {
+            // a rename would keep the new file, we want to keep the old one
+            await Deno.lstat(finalName);
+            // if we make it here, we don't need the file we just downloaded
+            await Deno.remove(filename, { recursive: true });
+        } catch (_) {
+            // (at least when the lstat was executed the file didn't exist, so rename)
+            try {
+                await Deno.rename(filename, finalName);
+            } catch (_) {
+                // ignore second failure
+            }
+        }
+        return updated;
     }
     return info;
 }
