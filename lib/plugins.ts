@@ -15,8 +15,6 @@
  */
 'use strict';
 
-import { escape } from "jsr:@std/regexp";
-
 /**
  * Plugin contributor information.
  */
